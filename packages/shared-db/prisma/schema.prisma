@@ -1,0 +1,835 @@
+// =============================================================================
+// CROSS ROPPONGI 業務システム群 — 統合 Prisma スキーマ
+//
+// 3システム(シフト給与 / AI上司 / 請求書管理)は 1 つの Supabase プロジェクトを共有し、
+// テーブルはプレフィックスなしで共存させる。Staff テーブルは 3 システム共用(二重管理禁止)。
+//
+// 日次で扱うデータは必ず `businessDate` (DATE) を持ち、カレンダー日付と混同しない。
+//   businessDate = (timestamp - 10時間) の Asia/Tokyo における日付  →  @sakura-cross/business-date
+//
+// 出典: 00_README_共通前提.md / 01_シフト給与 / 02_AI上司 / 03_請求書管理 の各データモデル骨子
+// =============================================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  // Supabase: Transaction pooler(6543, pgbouncer=true)をアプリ用に
+  url        = env("DATABASE_URL")
+  // Supabase: Direct connection(5432)を migrate 用に
+  directUrl  = env("DIRECT_URL")
+  // AI上司のベクトル検索用(pgvector)。Supabase では Database > Extensions で有効化
+  extensions = [vector]
+}
+
+// -----------------------------------------------------------------------------
+// 共通 enum
+// -----------------------------------------------------------------------------
+
+/// 職種
+enum StaffRole {
+  RECEPTION
+  BARTENDER
+  BARBACK
+  FLOOR_VIP
+  CLOAK
+  SECURITY
+  MANAGER
+}
+
+/// 雇用形態
+enum EmploymentType {
+  PART_TIME
+  FULL_TIME
+  CONTRACT
+}
+
+/// 管理画面のアクセス権限(Supabase Auth と紐付け)。ADMIN=オーナー/店長、STAFF=一般
+enum AccessRole {
+  ADMIN
+  STAFF
+}
+
+/// 営業日のイベント種別
+enum EventType {
+  NORMAL
+  BIG_EVENT
+  RENTAL
+  CLOSED
+}
+
+/// 希望シフト
+enum Availability {
+  OK
+  NG
+  EARLY_ONLY
+  LATE_ONLY
+}
+
+/// 確定シフトの状態
+enum ShiftStatus {
+  DRAFT
+  CONFIRMED
+  CANCELLED
+  ABSENT
+}
+
+/// 欠員募集の状態
+enum OpenShiftStatus {
+  OPEN
+  FILLED
+  EXPIRED
+}
+
+/// 請求書の状態
+enum InvoiceStatus {
+  NEEDS_REVIEW
+  APPROVED
+  SCHEDULED
+  PAID
+  REJECTED
+  DUPLICATE
+}
+
+/// 失敗キュー(ジョブ)の状態
+enum JobStatus {
+  PENDING
+  PROCESSING
+  FAILED
+  DONE
+}
+
+/// LINE 公式アカウントの区別
+enum LineChannel {
+  STAFF
+  ADMIN
+}
+
+// -----------------------------------------------------------------------------
+// 共通: スタッフ(3システム共用。ここ以外に Staff を定義しない)
+// -----------------------------------------------------------------------------
+
+model Staff {
+  id             String         @id @default(uuid())
+  /// LINE 連携後に格納(「CROSS スタッフ」アカウントの userId)
+  lineUserId     String?        @unique
+  /// Supabase Auth のユーザー ID(管理画面ログイン用。スタッフは未設定で可)
+  authUserId     String?        @unique
+  name           String
+  nameKana       String?
+  /// 職種
+  role           StaffRole
+  /// 管理画面の権限
+  accessRole     AccessRole     @default(STAFF)
+  employmentType EmploymentType
+  /// 円。「現在値のキャッシュ」であり、給与計算は必ず WageHistory を参照する
+  hourlyWage     Int
+  /// 社員の月給(円)
+  monthlySalary  Int?
+  /// 18歳未満は 22:00 以降のシフト割当禁止
+  isMinor        Boolean        @default(false)
+  isActive       Boolean        @default(true)
+  /// {"vip": true, "english": true} 等の柔軟なタグ
+  skills         Json?
+  /// 新人判定(入店3ヶ月未満)に使用
+  hiredAt        DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  // --- システム1: シフト給与 ---
+  wageHistories         WageHistory[]
+  shiftPreferences      ShiftPreference[]
+  shiftAssignments      ShiftAssignment[]
+  filledOpenShifts      OpenShiftRequest[]
+  openShiftApplications OpenShiftApplication[]
+  swapRequests          ShiftSwapRequest[]            @relation("SwapRequester")
+  acceptedSwaps         ShiftSwapRequest[]            @relation("SwapAccepter")
+  timeRecords           TimeRecord[]
+  correctionRequests    TimeRecordCorrectionRequest[]
+  advancePayments       AdvancePayment[]
+  incentives            Incentive[]
+  payrollItems          PayrollItem[]
+  registrationRequests  LineRegistrationRequest[]
+
+  // --- システム2: AI上司 ---
+  conversations     Conversation[]
+  escalationTickets EscalationTicket[]
+  quizResults       QuizResult[]
+
+  @@index([isActive, role])
+}
+
+// -----------------------------------------------------------------------------
+// システム1: シフト調整・給与計算
+// -----------------------------------------------------------------------------
+
+/// 時給改定履歴。給与計算は勤務日(businessDate)時点で有効な行を参照する
+model WageHistory {
+  id            String   @id @default(uuid())
+  staffId       String
+  hourlyWage    Int
+  /// この日以降の勤務に適用
+  effectiveFrom DateTime @db.Date
+  createdAt     DateTime @default(now())
+
+  staff Staff @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@index([staffId, effectiveFrom])
+}
+
+/// LIFF からの初回登録申請(店長が承認して Staff と紐付ける)
+model LineRegistrationRequest {
+  id            String    @id @default(uuid())
+  lineUserId    String    @unique
+  /// LINE プロフィールの表示名
+  displayName   String?
+  /// 本人が入力した氏名
+  nameInput     String
+  nameKanaInput String?
+  /// PENDING / APPROVED / REJECTED
+  status        String    @default("PENDING")
+  staffId       String?
+  resolvedBy    String?
+  resolvedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  staff Staff? @relation(fields: [staffId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+}
+
+/// イベント種別ごとの必要人員テンプレート(管理画面で編集、ワンクリック展開)
+model StaffingTemplate {
+  id         String    @id @default(uuid())
+  eventType  EventType
+  roleNeeded StaffRole
+  /// 営業日基準の開始時刻 "HH:mm"(例 "20:00")
+  startTime  String
+  /// 営業日基準の終了時刻 "HH:mm"(例 "05:00" = 翌朝)
+  endTime    String
+  headcount  Int
+  sortOrder  Int       @default(0)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([eventType])
+}
+
+/// シフト募集期間(半月単位)
+model ShiftPeriod {
+  id                 String    @id @default(uuid())
+  periodStart        DateTime  @db.Date
+  periodEnd          DateTime  @db.Date
+  /// 希望提出締切
+  preferenceDeadline DateTime
+  /// COLLECTING / GENERATING / CONFIRMED
+  status             String    @default("COLLECTING")
+  generatedAt        DateTime?
+  confirmedAt        DateTime?
+  confirmedBy        String?
+  /// リマインド送信済み記録("2days" / "deadline")
+  remindersSent      String[]
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([periodStart, periodEnd])
+}
+
+/// 営業日(イベント・動員予測)
+model BusinessDay {
+  id            String    @id @default(uuid())
+  businessDate  DateTime  @unique @db.Date
+  /// 例: "TOKYO TRANCE COLLECTIVE"
+  eventName     String?
+  eventType     EventType @default(NORMAL)
+  /// 動員予測(人)
+  expectedCrowd Int?
+  note          String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  staffingRequirements StaffingRequirement[]
+  shiftAssignments     ShiftAssignment[]
+  openShiftRequests    OpenShiftRequest[]
+}
+
+/// 営業日×職種×時間帯の必要人数
+model StaffingRequirement {
+  id            String    @id @default(uuid())
+  businessDayId String
+  roleNeeded    StaffRole
+  /// 例 20:00
+  startTime     DateTime
+  /// 例 翌 5:00
+  endTime       DateTime
+  headcount     Int
+
+  businessDay BusinessDay @relation(fields: [businessDayId], references: [id], onDelete: Cascade)
+
+  @@index([businessDayId, roleNeeded])
+}
+
+/// スタッフの希望シフト
+model ShiftPreference {
+  id           String       @id @default(uuid())
+  staffId      String
+  businessDate DateTime     @db.Date
+  availability Availability
+  submittedAt  DateTime     @default(now())
+
+  staff Staff @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@unique([staffId, businessDate])
+  @@index([businessDate])
+}
+
+/// 確定シフト
+model ShiftAssignment {
+  id                String      @id @default(uuid())
+  staffId           String
+  businessDayId     String
+  roleAssigned      StaffRole
+  plannedStart      DateTime
+  plannedEnd        DateTime
+  status            ShiftStatus @default(DRAFT)
+  /// AUTO(自動生成) / MANUAL(手修正) / OPEN_SHIFT(欠員募集で確定) / SWAP
+  source            String      @default("AUTO")
+  /// 最後に本人へ LINE 通知した時点の内容ハッシュ(差分通知の判定用)
+  notifiedSignature String?
+  notifiedAt        DateTime?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  staff        Staff              @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  businessDay  BusinessDay        @relation(fields: [businessDayId], references: [id], onDelete: Cascade)
+  swapRequests ShiftSwapRequest[]
+
+  @@index([staffId, status])
+  @@index([businessDayId, roleAssigned])
+}
+
+/// 欠員募集
+model OpenShiftRequest {
+  id               String          @id @default(uuid())
+  businessDayId    String
+  roleNeeded       StaffRole
+  start            DateTime
+  end              DateTime
+  /// "生成時不足" / "当日欠勤(〇〇)" / "交代申請"
+  reason           String
+  status           OpenShiftStatus @default(OPEN)
+  filledByStaffId  String?
+  /// 楽観ロック用(先着順の排他制御)
+  version          Int             @default(0)
+  /// FIRST_COME(先着) / MANAGER_APPROVAL(店長承認)。発行時の設定値を固定
+  mode             String          @default("FIRST_COME")
+  /// 募集を配信したスタッフ ID(締切通知の宛先)
+  notifiedStaffIds String[]
+  /// 確定時に作成した ShiftAssignment
+  assignmentId     String?
+  expiresAt        DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  businessDay  BusinessDay            @relation(fields: [businessDayId], references: [id], onDelete: Cascade)
+  filledBy     Staff?                 @relation(fields: [filledByStaffId], references: [id], onDelete: SetNull)
+  applications OpenShiftApplication[]
+
+  @@index([status, businessDayId])
+}
+
+/// 欠員募集への応募(先着・承認いずれの方式でも記録し、落選者への通知に使う)
+model OpenShiftApplication {
+  id                 String   @id @default(uuid())
+  openShiftRequestId String
+  staffId            String
+  /// APPLIED / WON / LOST / WITHDRAWN
+  status             String   @default("APPLIED")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  openShiftRequest OpenShiftRequest @relation(fields: [openShiftRequestId], references: [id], onDelete: Cascade)
+  staff            Staff            @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@unique([openShiftRequestId, staffId])
+}
+
+/// 事前の交代申請
+model ShiftSwapRequest {
+  id                String   @id @default(uuid())
+  /// 手放したいシフト
+  assignmentId      String
+  requesterStaffId  String
+  reason            String?
+  /// PENDING_MANAGER / OPEN_RECRUITING / SWAPPED / REJECTED
+  status            String
+  acceptedByStaffId String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  assignment ShiftAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  requester  Staff           @relation("SwapRequester", fields: [requesterStaffId], references: [id], onDelete: Cascade)
+  acceptedBy Staff?          @relation("SwapAccepter", fields: [acceptedByStaffId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+}
+
+/// 勤怠実績
+model TimeRecord {
+  id               String    @id @default(uuid())
+  staffId          String
+  businessDate     DateTime  @db.Date
+  clockIn          DateTime?
+  clockOut         DateTime?
+  breakMinutes     Int       @default(0)
+  /// 打刻漏れ修正フラグ
+  editedByAdmin    Boolean   @default(false)
+  approved         Boolean   @default(false)
+  /// LIFF / ADMIN / CORRECTION / seed(打刻の入力元)
+  source           String    @default("LIFF")
+  /// 位置情報(取れた場合のみ)
+  clockInLocation  Json?
+  clockOutLocation Json?
+  note             String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  staff Staff @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@unique([staffId, businessDate])
+  @@index([businessDate, approved])
+}
+
+/// 打刻漏れ・誤打刻の修正申請(LIFF から申請 → 店長が承認)
+model TimeRecordCorrectionRequest {
+  id                    String    @id @default(uuid())
+  staffId               String
+  businessDate          DateTime  @db.Date
+  requestedClockIn      DateTime?
+  requestedClockOut     DateTime?
+  requestedBreakMinutes Int?
+  reason                String
+  /// PENDING / APPROVED / REJECTED
+  status                String    @default("PENDING")
+  resolvedBy            String?
+  resolvedAt            DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  staff Staff @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([staffId, businessDate])
+}
+
+/// 日払い・前払いの台帳
+model AdvancePayment {
+  id           String   @id @default(uuid())
+  staffId      String
+  businessDate DateTime @db.Date
+  amount       Int
+  /// 渡した管理者名
+  paidBy       String
+  memo         String?
+  createdAt    DateTime @default(now())
+
+  staff Staff @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@index([staffId, businessDate])
+}
+
+/// ドリンクバック等の歩合
+model Incentive {
+  id           String   @id @default(uuid())
+  staffId      String
+  businessDate DateTime @db.Date
+  /// "bottle_back" / "door_back" など
+  kind         String
+  amount       Int
+  createdAt    DateTime @default(now())
+
+  staff Staff @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@index([staffId, businessDate])
+}
+
+/// 月次給与計算の実行結果
+model PayrollRun {
+  id               String    @id @default(uuid())
+  periodStart      DateTime  @db.Date
+  periodEnd        DateTime  @db.Date
+  /// DRAFT / FINALIZED(FINALIZED で対象期間の勤怠・日払い・歩合は編集不可)
+  status           String    @default("DRAFT")
+  /// 計算時点の設定値(丸め・休憩・割増率など)のスナップショット
+  settingsSnapshot Json?
+  /// 計算時の警告(未承認打刻・時給履歴なし等)
+  warnings         String[]
+  createdBy        String?
+  finalizedAt      DateTime?
+  finalizedBy      String?
+  /// 明細を LINE 配信した時刻
+  payslipsSentAt   DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  items PayrollItem[]
+
+  @@index([periodStart, periodEnd])
+}
+
+model PayrollItem {
+  id               String   @id @default(uuid())
+  payrollRunId     String
+  staffId          String
+  totalMinutes     Int
+  /// 22:00-5:00 の分数
+  nightMinutes     Int
+  basePay          Int
+  /// 深夜割増 25% 分
+  nightPremiumPay  Int
+  incentivePay     Int
+  /// 日払い済み控除
+  advanceDeduction Int
+  grossPay         Int
+  /// 差引支給 = grossPay − advanceDeduction
+  netPay           Int
+  /// 月給者の場合の固定額(時給者は null)
+  monthlySalary    Int?
+  warnings         String[]
+  /// 日別内訳(明細表示用)
+  breakdown        Json
+
+  payrollRun PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  staff      Staff      @relation(fields: [staffId], references: [id], onDelete: Restrict)
+
+  @@unique([payrollRunId, staffId])
+}
+
+// -----------------------------------------------------------------------------
+// システム2: AI上司(教育・Q&Aボット)
+// -----------------------------------------------------------------------------
+
+model KnowledgeDoc {
+  id        String   @id @default(uuid())
+  category  String
+  title     String
+  /// Markdown
+  content   String
+  version   Int      @default(1)
+  /// false = ドラフト(取込直後・店長の確認待ち)または無効化済み。検索対象は true のみ
+  isActive  Boolean  @default(true)
+  /// "manual" / "import" / "seed" / "escalation"(未回答キューからの追記)
+  source    String   @default("manual")
+  updatedBy String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  chunks   KnowledgeChunk[]
+  versions KnowledgeDocVersion[]
+  imports  KnowledgeImport[]
+
+  @@index([category, isActive])
+}
+
+/// ナレッジのバージョン履歴(保存ごとに保存前の内容をスナップショット)
+model KnowledgeDocVersion {
+  id        String   @id @default(uuid())
+  docId     String
+  version   Int
+  category  String
+  title     String
+  content   String
+  updatedBy String
+  createdAt DateTime @default(now())
+
+  doc KnowledgeDoc @relation(fields: [docId], references: [id], onDelete: Cascade)
+
+  @@unique([docId, version])
+}
+
+model KnowledgeChunk {
+  id         String                       @id @default(uuid())
+  docId      String
+  /// チャンクが属する見出し(検索スコアと引用表示に使用)
+  heading    String?
+  content    String
+  /// pgvector。フェーズ1(全文検索)で未使用なら null 可
+  embedding  Unsupported("vector(1024)")?
+  chunkIndex Int
+
+  doc KnowledgeDoc @relation(fields: [docId], references: [id], onDelete: Cascade)
+
+  @@unique([docId, chunkIndex])
+}
+
+/// 既存マニュアル(PDF / Word / 画像)の取込ジョブ。Claude で Markdown 化してドラフト KnowledgeDoc を作る
+model KnowledgeImport {
+  id          String   @id @default(uuid())
+  fileName    String
+  mimeType    String
+  sizeBytes   Int
+  /// Supabase Storage のパス(未設定環境では null)
+  storagePath String?
+  /// PENDING / CONVERTING / DRAFTED / FAILED
+  status      String   @default("PENDING")
+  category    String
+  draftDocId  String?
+  lastError   String?
+  createdBy   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  draftDoc KnowledgeDoc? @relation(fields: [draftDocId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+}
+
+model Conversation {
+  id            String    @id @default(uuid())
+  staffId       String
+  createdAt     DateTime  @default(now())
+  /// 30 分無応答でセッションを区切る判定に使う
+  lastMessageAt DateTime  @default(now())
+  closedAt      DateTime?
+
+  staff    Staff     @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@index([staffId, lastMessageAt])
+}
+
+model Message {
+  id             String   @id @default(uuid())
+  conversationId String
+  /// "staff" / "ai" / "manager"
+  sender         String
+  content        String
+  /// 回答の根拠ドキュメント
+  citedDocIds    String[]
+  /// "high" / "low" / "no_answer"(AI 回答)/ "emergency"(緊急固定応答)/ "hr_redirect"(人事質問の店長誘導)
+  confidence     String?
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+}
+
+/// AI が答えられなかった質問
+model EscalationTicket {
+  id             String    @id @default(uuid())
+  staffId        String
+  /// 質問が発生した会話(ログ画面から辿る用。会話削除時は null)
+  conversationId String?
+  question       String
+  /// OPEN / ANSWERED / ADDED_TO_KB
+  status         String
+  managerAnswer  String?
+  answeredBy     String?
+  answeredAt     DateTime?
+  /// 店長回答を LINE で質問者へ届けた時刻(null なら未配信 → Job で再試行)
+  deliveredAt    DateTime?
+  /// ナレッジへ追記した先のドキュメント
+  addedDocId     String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  staff Staff @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([staffId, createdAt])
+}
+
+/// 理解度チェック
+model TrainingQuiz {
+  id          String   @id @default(uuid())
+  category    String
+  question    String
+  /// ["A...", "B...", "C..."]
+  choices     Json
+  answerIdx   Int
+  explanation String
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  results QuizResult[]
+
+  @@index([category, isActive])
+}
+
+model QuizResult {
+  id         String   @id @default(uuid())
+  staffId    String
+  quizId     String
+  correct    Boolean
+  answeredAt DateTime @default(now())
+
+  staff Staff        @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  quiz  TrainingQuiz @relation(fields: [quizId], references: [id], onDelete: Cascade)
+
+  @@index([staffId, answeredAt])
+}
+
+// -----------------------------------------------------------------------------
+// システム3: 請求書AI管理
+// -----------------------------------------------------------------------------
+
+model Vendor {
+  id                   String   @id @default(uuid())
+  name                 String
+  /// 表記ゆれ
+  nameAliases          String[]
+  /// インボイス登録番号(T+13桁)
+  registrationNo       String?
+  bankInfo             String?
+  /// EOM_NEXT_EOM / EOM_NEXT_20TH / IMMEDIATE / CUSTOM:<days>
+  paymentTerms         String?
+  /// BANK_TRANSFER / CASH / DIRECT_DEBIT / CARD
+  defaultPaymentMethod String?
+  /// 送信元検証用の登録メールアドレス/ドメイン
+  knownEmails          String[]
+  /// 毎月請求が来るはずの定期取引先(未着アラート対象)
+  expectedMonthly      Boolean  @default(false)
+  isApproved           Boolean  @default(false)
+  /// 酒販/氷/リネン/警備/出演者/その他
+  category             String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  invoices Invoice[]
+
+  @@index([name])
+}
+
+/// 取込レコード(原本)。原本ファイルは削除しない(電子帳簿保存法を意識)
+model InvoiceIntake {
+  id            String   @id @default(uuid())
+  /// EMAIL / LINE / MANUAL
+  source        String
+  /// Supabase Storage のパス/URL
+  fileUrl       String?
+  fileName      String?
+  mimeType      String?
+  emailFrom     String?
+  emailSubject  String?
+  /// 送信元が取引先マスタに未登録
+  unknownSender Boolean  @default(false)
+  /// 本文のみで添付が無かったメール(見落とし防止のため記録)
+  hasAttachment Boolean  @default(true)
+  receivedAt    DateTime @default(now())
+  /// RECEIVED / EXTRACTED / FAILED
+  status        String
+  lastError     String?
+  updatedAt     DateTime @updatedAt
+
+  invoices Invoice[]
+
+  @@index([status, receivedAt])
+}
+
+model Invoice {
+  id            String        @id @default(uuid())
+  intakeId      String
+  vendorId      String?
+  /// AI 抽出スキーマ全体(JSON)
+  extracted     Json
+  totalAmount   Int
+  /// BANK_TRANSFER / CASH / DIRECT_DEBIT / CARD(推定→承認時に確定)
+  paymentMethod String?
+  dueDate       DateTime?     @db.Date
+  /// EXTRACTED / TERMS_CALCULATED / MANUAL
+  dueDateSource String?
+  status        InvoiceStatus @default(NEEDS_REVIEW)
+  /// "duplicate_suspect" / "amount_anomaly" / "low_confidence" / "performer_fee" / "unknown_sender"
+  flags         String[]
+  approvedBy    String?
+  approvedAt    DateTime?
+  paidAt        DateTime?
+  paidBy        String?
+  memo          String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  intake InvoiceIntake @relation(fields: [intakeId], references: [id], onDelete: Restrict)
+  vendor Vendor?       @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+
+  @@index([status, dueDate])
+  @@index([vendorId, createdAt])
+}
+
+model NotificationLog {
+  id         String   @id @default(uuid())
+  invoiceIds String[]
+  /// LINE
+  channel    String
+  /// WEEKLY_DIGEST / DUE_ALERT / INTAKE_RESULT
+  kind       String
+  sentAt     DateTime @default(now())
+
+  @@index([kind, sentAt])
+}
+
+// -----------------------------------------------------------------------------
+// 共通: 信頼性要件(Webhook 冪等性 / 失敗キュー / 設定値 / 監査ログ)
+// -----------------------------------------------------------------------------
+
+/// LINE Webhook の処理済みイベント(webhookEventId による冪等性チェック)
+model ProcessedWebhookEvent {
+  webhookEventId String      @id
+  channel        LineChannel
+  eventType      String
+  receivedAt     DateTime    @default(now())
+
+  @@index([receivedAt])
+}
+
+/// 失敗キュー。AI抽出・プッシュ配信・外部API呼び出しはすべてここを経由し、cron で再試行する
+model Job {
+  id          String    @id @default(uuid())
+  /// 例: LINE_PUSH / INVOICE_EXTRACT / KNOWLEDGE_EMBED / HEALTH_REPORT
+  kind        String
+  payload     Json
+  status      JobStatus @default(PENDING)
+  attempts    Int       @default(0)
+  /// 既定 3 回。超えたら FAILED のまま管理アカウントへ通知
+  maxAttempts Int       @default(3)
+  lastError   String?
+  /// 指数バックオフ後の次回実行時刻
+  runAfter    DateTime  @default(now())
+  lockedAt    DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([status, runAfter])
+  @@index([kind, status])
+}
+
+/// 管理画面から変更可能な設定値(時給既定・必要人員テンプレ・丸め単位・締め日など)。ハードコード禁止
+model AppSetting {
+  key         String   @id
+  value       Json
+  description String?
+  updatedBy   String?
+  updatedAt   DateTime @updatedAt
+}
+
+/// 監査ログ(誰がいつ承認・支払記録・修正したか)
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String?
+  actorName  String?
+  /// 例: invoice.approve / payroll.finalize / timeRecord.edit
+  action     String
+  targetType String
+  targetId   String?
+  detail     Json?
+  createdAt  DateTime @default(now())
+
+  @@index([targetType, targetId])
+  @@index([createdAt])
+}

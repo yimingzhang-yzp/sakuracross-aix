@@ -1,0 +1,35 @@
+# dependencies
+node_modules/
+
+# build outputs
+.next/
+dist/
+out/
+*.tsbuildinfo
+next-env.d.ts
+
+# turborepo
+.turbo/
+
+# env(実キーは絶対にコミットしない)
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# test / coverage
+coverage/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# logs
+npm-debug.log*
+*.log
+
+# ローカル開発 DB(PGlite)
+.pglite/

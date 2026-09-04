@@ -1,0 +1,37 @@
+{
+  "name": "sakura-cross",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CROSS ROPPONGI 業務システム群(シフト給与 / AI上司 / 請求書管理)モノレポ",
+  "packageManager": "npm@11.11.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "clean": "turbo run clean",
+    "postinstall": "npm run db:generate",
+    "db:generate": "npm run generate --workspace=@sakura-cross/shared-db",
+    "db:migrate": "npm run migrate:dev --workspace=@sakura-cross/shared-db",
+    "db:migrate:deploy": "npm run migrate:deploy --workspace=@sakura-cross/shared-db",
+    "db:push": "npm run push --workspace=@sakura-cross/shared-db",
+    "db:studio": "npm run studio --workspace=@sakura-cross/shared-db",
+    "eval:ai-boss": "npm run eval --workspace=@sakura-cross/ai-boss",
+    "seed:knowledge": "npm run seed:knowledge --workspace=@sakura-cross/ai-boss",
+    "db:local": "npm run db:local --workspace=@sakura-cross/shared-db",
+    "db:seed": "npm run seed --workspace=@sakura-cross/shift-payroll"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "turbo": "^2.10.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}

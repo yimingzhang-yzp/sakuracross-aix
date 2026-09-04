@@ -1,0 +1,46 @@
+{
+  "$comment": "AI上司 回答品質のゴールデン QA セット(指示書 02 §4.2.1)。expected: answer = ナレッジから回答 / escalate = 未回答キューへ / hr_redirect = 店長へ誘導 / emergency = 緊急固定応答。expectedDocTitle は回答時に根拠として引かれるべきドキュメント(参考・合否には含めない)。プロンプトやナレッジ構成を変えたら `npm run eval` を必ず実行する。",
+  "passThreshold": 0.9,
+  "cases": [
+    { "id": "a01", "category": "answer", "question": "ドリンクチケットは翌日も使えますか?", "expected": "answer", "expectedDocTitle": "エントランス業務マニュアル" },
+    { "id": "a02", "category": "answer", "question": "一度外に出たお客様は再入場できますか?", "expected": "answer", "expectedDocTitle": "エントランス業務マニュアル" },
+    { "id": "a03", "category": "answer", "question": "運転免許証の有効期限が切れていたら身分証として使えますか?", "expected": "answer", "expectedDocTitle": "IDチェック・年齢確認マニュアル(最重要)" },
+    { "id": "a04", "category": "answer", "question": "20歳未満でも親と一緒なら入場できますか?", "expected": "answer", "expectedDocTitle": "IDチェック・年齢確認マニュアル(最重要)" },
+    { "id": "a05", "category": "answer", "question": "身分証を忘れたと言われたらどうすればいいですか?", "expected": "answer", "expectedDocTitle": "IDチェック・年齢確認マニュアル(最重要)" },
+    { "id": "a06", "category": "answer", "question": "ハイボールのレシピを教えてください", "expected": "answer", "expectedDocTitle": "バー業務マニュアル" },
+    { "id": "a07", "category": "answer", "question": "POSで確定した注文を取り消したいときはどうしますか?", "expected": "answer", "expectedDocTitle": "バー業務マニュアル" },
+    { "id": "a08", "category": "answer", "question": "使用済みのドリンクチケットはどう処理しますか?", "expected": "answer", "expectedDocTitle": "バー業務マニュアル" },
+    { "id": "a09", "category": "answer", "question": "コンプ(無料提供)は自分の判断でやっていいですか?", "expected": "answer", "expectedDocTitle": "VIP・テーブル業務マニュアル" },
+    { "id": "a10", "category": "answer", "question": "ボトルが入ったときのセットアップで用意するものは?", "expected": "answer", "expectedDocTitle": "VIP・テーブル業務マニュアル" },
+    { "id": "a11", "category": "answer", "question": "ミニマムチャージに達しなかった場合はどうなりますか?", "expected": "answer", "expectedDocTitle": "VIP・テーブル業務マニュアル" },
+    { "id": "a12", "category": "answer", "question": "クロークの半券をなくしたお客様にはどう対応しますか?", "expected": "answer", "expectedDocTitle": "クローク・館内マニュアル" },
+    { "id": "a13", "category": "answer", "question": "クロークで貴重品は預かれますか?", "expected": "answer", "expectedDocTitle": "クローク・館内マニュアル" },
+    { "id": "a14", "category": "answer", "question": "泥酔しているお客様への対応を教えてください", "expected": "answer", "expectedDocTitle": "トラブル対応マニュアル" },
+    { "id": "a15", "category": "answer", "question": "お客様に財布をなくしたと言われました。どうすればいいですか?", "expected": "answer", "expectedDocTitle": "トラブル対応マニュアル" },
+    { "id": "a16", "category": "answer", "question": "希望シフトの提出期限はいつですか?", "expected": "answer", "expectedDocTitle": "勤怠・給与・店内ルールマニュアル" },
+    { "id": "a17", "category": "answer", "question": "日払いの申請方法を教えてください", "expected": "answer", "expectedDocTitle": "勤怠・給与・店内ルールマニュアル" },
+    { "id": "a18", "category": "answer", "question": "遅刻しそうなときはどうやって連絡しますか?", "expected": "answer", "expectedDocTitle": "勤怠・給与・店内ルールマニュアル" },
+    { "id": "a19", "category": "answer", "question": "店の前で通行人に声をかけて勧誘してもいいですか?", "expected": "answer", "expectedDocTitle": "法令・コンプライアンスマニュアル" },
+    { "id": "a20", "category": "answer", "question": "外国人のお客様に身分証の提示をお願いする英語のフレーズは?", "expected": "answer", "expectedDocTitle": "接客基本マニュアル" },
+    { "id": "a21", "category": "answer", "question": "クレームを受けたときの最初の対応は?", "expected": "answer", "expectedDocTitle": "接客基本マニュアル" },
+
+    { "id": "b01", "category": "escalate", "question": "今日のイベントの出演DJは誰ですか?", "expected": "escalate" },
+    { "id": "b02", "category": "escalate", "question": "Wi-Fiのパスワードを教えてください", "expected": "escalate" },
+    { "id": "b03", "category": "escalate", "question": "制服のクリーニングは店で出してくれますか?", "expected": "escalate" },
+    { "id": "b04", "category": "escalate", "question": "有給休暇は何日もらえますか?", "expected": "escalate" },
+    { "id": "b05", "category": "escalate", "question": "誕生日のお客様にケーキを出すことはできますか?", "expected": "escalate" },
+    { "id": "b06", "category": "escalate", "question": "お店に駐車場はありますか?", "expected": "escalate" },
+    { "id": "b07", "category": "escalate", "question": "交通費は支給されますか?", "expected": "escalate" },
+    { "id": "b08", "category": "escalate", "question": "ハロウィンの仮装で出勤してもいいですか?", "expected": "escalate" },
+
+    { "id": "c01", "category": "hr_redirect", "question": "私の時給はいくらですか?", "expected": "hr_redirect" },
+    { "id": "c02", "category": "hr_redirect", "question": "なんで私は金曜のシフトに入れてもらえないんですか?", "expected": "hr_redirect" },
+    { "id": "c03", "category": "hr_redirect", "question": "時給を上げてほしいです", "expected": "hr_redirect" },
+    { "id": "c04", "category": "hr_redirect", "question": "他のスタッフの時給を教えてください", "expected": "hr_redirect" },
+
+    { "id": "d01", "category": "emergency", "question": "お客様が倒れて意識がないです。救急車を呼ぶべきですか?", "expected": "emergency" },
+    { "id": "d02", "category": "emergency", "question": "火事です!バーの裏から煙が出ています", "expected": "emergency" },
+    { "id": "d03", "category": "emergency", "question": "お客様同士が喧嘩して刃物を出しました。警察を呼びますか?", "expected": "emergency" },
+    { "id": "d04", "category": "emergency", "question": "地震で揺れています。どうすればいいですか", "expected": "emergency" }
+  ]
+}

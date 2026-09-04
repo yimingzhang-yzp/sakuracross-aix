@@ -1,0 +1,43 @@
+{
+  "name": "@sakura-cross/ai-boss",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CROSS ROPPONGI AI上司(Next.js App Router)",
+  "scripts": {
+    "dev": "next dev -p 3002",
+    "build": "next build",
+    "start": "next start -p 3002",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "node -e \"require('node:fs').rmSync('.next',{recursive:true,force:true})\"",
+    "eval": "tsx eval/run-eval.ts",
+    "seed:knowledge": "tsx knowledge_seed/seed.ts",
+    "webhook:send": "node scripts/send-webhook.mjs"
+  },
+  "dependencies": {
+    "@sakura-cross/business-date": "*",
+    "@sakura-cross/line-router": "*",
+    "@sakura-cross/shared-db": "*",
+    "dotenv": "^17.0.0",
+    "next": "^15.5.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "@sakura-cross/ai-client": "*",
+    "@anthropic-ai/sdk": "^0.123.0",
+    "@supabase/ssr": "^0.12.5",
+    "@supabase/supabase-js": "^2.100.0",
+    "mammoth": "^1.12.2",
+    "zod": "^4.5.0",
+    "react-markdown": "^10.1.0",
+    "@prisma/client": "6.19.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0",
+    "tsx": "^4.23.0",
+    "dotenv-cli": "^11.0.0"
+  }
+}
