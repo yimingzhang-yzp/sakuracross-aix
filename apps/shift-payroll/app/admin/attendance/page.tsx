@@ -247,16 +247,26 @@ export default async function AttendancePage({
                   </td>
                   <td className="small">{c.reason}</td>
                   <td>
-                    <form action={resolveCorrectionAction} className="inline">
-                      <input type="hidden" name="id" value={c.id} />
-                      <input type="hidden" name="date" value={date} />
-                      <button type="submit" name="decision" value="APPROVED" className="btn primary sm">
-                        承認して反映
-                      </button>
-                      <button type="submit" name="decision" value="REJECTED" className="btn danger sm">
-                        却下
-                      </button>
-                    </form>
+                    {/* 判定値は hidden input で渡す。送信ボタンの name/value(submitter)は
+                        Server Action の FormData に含まれないことがあるため、フォームを 2 つに分ける */}
+                    <div className="inline">
+                      <form action={resolveCorrectionAction}>
+                        <input type="hidden" name="id" value={c.id} />
+                        <input type="hidden" name="date" value={date} />
+                        <input type="hidden" name="decision" value="APPROVED" />
+                        <button type="submit" className="btn primary sm">
+                          承認して反映
+                        </button>
+                      </form>
+                      <form action={resolveCorrectionAction}>
+                        <input type="hidden" name="id" value={c.id} />
+                        <input type="hidden" name="date" value={date} />
+                        <input type="hidden" name="decision" value="REJECTED" />
+                        <button type="submit" className="btn danger sm">
+                          却下
+                        </button>
+                      </form>
+                    </div>
                   </td>
                 </tr>
               ))}

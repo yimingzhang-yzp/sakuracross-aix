@@ -113,7 +113,11 @@ export async function resolveCorrectionAction(form: FormData): Promise<void> {
   const id = str(form, 'id');
   const date = str(form, 'date') ?? '';
   const decision = str(form, 'decision');
-  if (!id || (decision !== 'APPROVED' && decision !== 'REJECTED')) redirect('/admin/attendance');
+  // 無言で同じ画面に戻すと「押しても何も起きない」ように見えるため、原因を画面に出す
+  if (!id) back(date, { error: '申請 ID を受け取れませんでした。画面を再読み込みしてやり直してください' });
+  if (decision !== 'APPROVED' && decision !== 'REJECTED') {
+    back(date, { error: `承認・却下の指定を受け取れませんでした(decision=${decision ?? '未送信'})` });
+  }
   const prisma = db();
   const req = await prisma.timeRecordCorrectionRequest.findUnique({ where: { id } });
   if (!req || req.status !== 'PENDING') back(date, { error: '申請が見つからないか処理済みです' });
