@@ -14,6 +14,9 @@ import {
   upsertTimeRecordAction,
 } from './actions';
 
+// LINE 配信や一括処理を含むため、既定(15秒)より長い上限を設定する
+export const maxDuration = 60;
+
 export default async function AttendancePage({
   searchParams,
 }: {

@@ -5,6 +5,9 @@ import type { LinePushPayload } from '@/lib/line/queue';
 
 import { dispatchNowAction, retryJobAction } from './actions';
 
+// LINE 配信や一括処理を含むため、既定(15秒)より長い上限を設定する
+export const maxDuration = 60;
+
 export default async function NotificationsPage({ searchParams }: { searchParams: Promise<{ ok?: string }> }) {
   const [jobs, params] = await Promise.all([
     db().job.findMany({ where: { kind: 'LINE_PUSH' }, orderBy: { createdAt: 'desc' }, take: 100 }),

@@ -7,6 +7,9 @@ import { getPayrollPeriod } from '@/lib/payroll/compute';
 
 import { createDraftAction } from './actions';
 
+// LINE 配信や一括処理を含むため、既定(15秒)より長い上限を設定する
+export const maxDuration = 60;
+
 export default async function PayrollPage({ searchParams }: { searchParams: Promise<{ error?: string; ok?: string }> }) {
   const [runs, settings, params] = await Promise.all([
     db().payrollRun.findMany({ include: { items: true }, orderBy: [{ periodStart: 'desc' }, { createdAt: 'desc' }] }),

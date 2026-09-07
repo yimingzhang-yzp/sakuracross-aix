@@ -7,6 +7,9 @@ import { bd, EVENT_TYPE_LABELS } from '@/lib/format';
 
 import { bulkCreateDaysAction } from './actions';
 
+// LINE 配信や一括処理を含むため、既定(15秒)より長い上限を設定する
+export const maxDuration = 60;
+
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
 
 function monthOf(param: string | undefined): { year: number; month: number } {

@@ -6,6 +6,9 @@ import { STAFF_ROLE_LABELS, type StaffRole } from '@/lib/scheduling/types';
 
 import { approveApplicationAction, closeOpenShiftAction } from './actions';
 
+// LINE 配信や一括処理を含むため、既定(15秒)より長い上限を設定する
+export const maxDuration = 60;
+
 export default async function OpenShiftsPage({ searchParams }: { searchParams: Promise<{ error?: string; ok?: string; all?: string }> }) {
   const params = await searchParams;
   const list = await db().openShiftRequest.findMany({

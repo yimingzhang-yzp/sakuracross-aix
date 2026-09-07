@@ -1,6 +1,6 @@
 'use server';
 
-import { addBusinessDays, businessDateToDbValue, isBusinessDateString } from '@sakura-cross/business-date';
+import { addBusinessDays, businessDateToDbValue, dbValueToBusinessDate, isBusinessDateString } from '@sakura-cross/business-date';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
@@ -114,19 +114,54 @@ export async function bulkCreateDaysAction(form: FormData): Promise<void> {
   const last = `${year}-${pad(mon)}-${pad(new Date(Date.UTC(year, mon, 0)).getUTCDate())}`;
 
   const prisma = db();
-  const templates = expand && eventType !== 'CLOSED' ? await prisma.staffingTemplate.findMany({ where: { eventType }, orderBy: { sortOrder: 'asc' } }) : [];
-  let created = 0;
+
+  // 日ごとに 1 クエリ投げると DB 往復が数十回になり関数がタイムアウトするため、
+  // 「既存を一括取得 → 不足分を一括作成 → 必要人員を一括作成」の 4 クエリに抑える。
+  const existing = await prisma.businessDay.findMany({
+    where: { businessDate: { gte: businessDateToDbValue(first), lte: businessDateToDbValue(last) } },
+    select: { businessDate: true },
+  });
+  const alreadyThere = new Set(existing.map((row) => dbValueToBusinessDate(row.businessDate)));
+
+  const missing: string[] = [];
   for (let d = first; d <= last; d = addBusinessDays(d, 1)) {
-    const exists = await prisma.businessDay.findUnique({ where: { businessDate: businessDateToDbValue(d) } });
-    if (exists) continue;
-    const day = await prisma.businessDay.create({ data: { businessDate: businessDateToDbValue(d), eventType } });
-    if (templates.length > 0) {
-      const drafts = expandTemplates(d, templates.map((t) => ({ roleNeeded: t.roleNeeded as StaffRole, startTime: t.startTime, endTime: t.endTime, headcount: t.headcount })));
-      await prisma.staffingRequirement.createMany({ data: drafts.map((x) => ({ businessDayId: day.id, ...x })) });
-    }
-    created++;
+    if (!alreadyThere.has(d)) missing.push(d);
   }
-  await audit(session, 'businessDay.bulkCreate', 'BusinessDay', null, { month, eventType, created });
+
+  if (missing.length === 0) {
+    redirect(`/admin/calendar?month=${month}&ok=${encodeURIComponent('未登録の営業日はありませんでした')}`);
+  }
+
+  const created = await prisma.businessDay.createManyAndReturn({
+    data: missing.map((d) => ({ businessDate: businessDateToDbValue(d), eventType })),
+    select: { id: true, businessDate: true },
+  });
+
+  let requirementRows = 0;
+  if (expand && eventType !== 'CLOSED') {
+    const templates = await prisma.staffingTemplate.findMany({ where: { eventType }, orderBy: { sortOrder: 'asc' } });
+    if (templates.length > 0) {
+      const rows = created.flatMap((day) => {
+        const businessDate = dbValueToBusinessDate(day.businessDate);
+        const drafts = expandTemplates(
+          businessDate,
+          templates.map((t) => ({ roleNeeded: t.roleNeeded as StaffRole, startTime: t.startTime, endTime: t.endTime, headcount: t.headcount })),
+        );
+        return drafts.map((x) => ({ businessDayId: day.id, ...x }));
+      });
+      if (rows.length > 0) {
+        await prisma.staffingRequirement.createMany({ data: rows });
+        requirementRows = rows.length;
+      }
+    }
+  }
+
+  await audit(session, 'businessDay.bulkCreate', 'BusinessDay', null, { month, eventType, created: created.length, requirementRows });
   revalidatePath('/admin/calendar');
-  redirect(`/admin/calendar?month=${month}&ok=${encodeURIComponent(`${created} 日を作成しました`)}`);
+  const suffix = expand && eventType !== 'CLOSED'
+    ? requirementRows > 0
+      ? ` / 必要人員 ${requirementRows} 行を展開`
+      : ' / テンプレートが未登録のため必要人員は作成されていません'
+    : '';
+  redirect(`/admin/calendar?month=${month}&ok=${encodeURIComponent(`${created.length} 日を作成しました${suffix}`)}`);
 }

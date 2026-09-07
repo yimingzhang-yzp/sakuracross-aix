@@ -11,6 +11,9 @@ import { PeriodStatus } from '../../period-status';
 import { confirmPeriodAction, generateAction } from '../actions';
 import { ShiftGrid, type GridData } from './shift-grid';
 
+// LINE 配信や一括処理を含むため、既定(15秒)より長い上限を設定する
+export const maxDuration = 60;
+
 export default async function PeriodDetailPage({
   params,
   searchParams,
