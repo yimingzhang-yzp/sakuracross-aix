@@ -22,10 +22,19 @@ export function appBaseUrl(): string {
   return (process.env.NEXT_PUBLIC_APP_URL_SHIFT_PAYROLL ?? 'http://localhost:3001').replace(/\/$/, '');
 }
 
+/**
+ * LIFF のディープリンクを組み立てる。
+ *
+ * LIFF のエンドポイント URL は `<公開URL>/liff` に登録する運用のため、
+ * `https://liff.line.me/<LIFF ID>/<page>` は `<公開URL>/liff/<page>` に解決される。
+ * ページごとに別の LIFF ID を割り当てている場合はその ID を優先し、
+ * 未設定なら共通の ID(PREFERENCE)にフォールバックする。
+ */
 export function liffUrl(page: LiffPage): string {
-  const envKey = LIFF_ENV[page];
-  const liffId = envKey ? process.env[envKey]?.trim() : undefined;
-  if (liffId) return `https://liff.line.me/${liffId}${page === 'register' ? '?page=register' : ''}`;
+  const specific = LIFF_ENV[page] ? process.env[LIFF_ENV[page] as string]?.trim() : undefined;
+  const shared = process.env.LINE_STAFF_LIFF_ID_PREFERENCE?.trim();
+  const liffId = specific || shared;
+  if (liffId) return `https://liff.line.me/${liffId}/${page}`;
   return `${appBaseUrl()}/liff/${page}`;
 }
 
