@@ -16,11 +16,11 @@ export default async function PayrollPage({ searchParams }: { searchParams: Prom
     loadSettings(),
     searchParams,
   ]);
+  // 既定は今月分の給与期間(月末締めなら今月 1 日〜末日)
   const today = toBusinessDate(new Date());
   const y = Number(today.slice(0, 4));
   const m = Number(today.slice(5, 7));
-  const prev = m === 1 ? { y: y - 1, m: 12 } : { y, m: m - 1 };
-  const suggested = getPayrollPeriod(settings.payrollClosingDay, prev.y, prev.m);
+  const suggested = getPayrollPeriod(settings.payrollClosingDay, y, m);
 
   return (
     <>
@@ -45,6 +45,7 @@ export default async function PayrollPage({ searchParams }: { searchParams: Prom
         </form>
         <p className="muted small" style={{ marginTop: 8 }}>
           締め日設定: {settings.payrollClosingDay === 'EOM' ? '月末締め' : `${settings.payrollClosingDay} 日締め`}。承認済みの打刻のみが対象です。同じ期間の既存ドラフトは置き換えられます。
+          健康保険・介護保険・厚生年金・雇用保険・源泉所得税は、スタッフごとの加入設定と<Link href="/admin/settings">設定</Link>の料率で自動控除します。
         </p>
       </div>
 
@@ -57,6 +58,7 @@ export default async function PayrollPage({ searchParams }: { searchParams: Prom
               <th>状態</th>
               <th className="num">人数</th>
               <th className="num">総支給合計</th>
+              <th className="num">法定控除合計</th>
               <th className="num">差引支給合計</th>
               <th>作成</th>
               <th>確定</th>
@@ -66,7 +68,7 @@ export default async function PayrollPage({ searchParams }: { searchParams: Prom
           <tbody>
             {runs.length === 0 ? (
               <tr>
-                <td colSpan={8} className="muted">
+                <td colSpan={9} className="muted">
                   計算履歴はありません
                 </td>
               </tr>
@@ -79,6 +81,7 @@ export default async function PayrollPage({ searchParams }: { searchParams: Prom
                   <td>{r.status === 'FINALIZED' ? <span className="badge ok">確定</span> : <span className="badge warn">ドラフト</span>}</td>
                   <td className="num">{r.items.length}</td>
                   <td className="num">{yen(r.items.reduce((s, i) => s + i.grossPay, 0))}</td>
+                  <td className="num">{yen(r.items.reduce((s, i) => s + i.healthInsurance + i.careInsurance + i.pensionInsurance + i.employmentInsurance + i.incomeTax, 0))}</td>
                   <td className="num">{yen(r.items.reduce((s, i) => s + i.netPay, 0))}</td>
                   <td className="small">{r.createdAt.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}</td>
                   <td className="small">{r.finalizedAt ? `${r.finalizedAt.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })} (${r.finalizedBy ?? ''})` : '—'}</td>

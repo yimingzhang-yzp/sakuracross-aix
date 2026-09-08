@@ -6,11 +6,13 @@ import { redirect } from 'next/navigation';
 import { z } from 'zod';
 
 import { requireAdmin } from '@/lib/auth/session';
-import { audit, db } from '@/lib/db';
+import { audit, db, loadSettings } from '@/lib/db';
+import { EVENT_TYPE_LABELS } from '@/lib/format';
+import { AUTO_EVENT_TYPE, type EventTypeValue, suggestEventType } from '@/lib/scheduling/day-type';
 import { expandTemplates } from '@/lib/scheduling/templates';
 import { STAFF_ROLES, type StaffRole } from '@/lib/scheduling/types';
 
-const eventTypeEnum = z.enum(['NORMAL', 'BIG_EVENT', 'RENTAL', 'CLOSED']);
+const eventTypeEnum = z.enum(['NORMAL', 'WEEKEND', 'BIG_EVENT', 'RENTAL', 'CLOSED']);
 
 function str(form: FormData, key: string): string | undefined {
   const v = form.get(key);
@@ -102,21 +104,26 @@ export async function deleteRequirementAction(form: FormData): Promise<void> {
 
 export async function bulkCreateDaysAction(form: FormData): Promise<void> {
   const session = await requireAdmin();
-  const month = str(form, 'month');
-  const eventType = eventTypeEnum.parse(str(form, 'eventType') ?? 'NORMAL');
+  const first = str(form, 'start');
+  const last = str(form, 'end');
+  const typeInput = str(form, 'eventType') ?? AUTO_EVENT_TYPE;
   const expand = form.get('expand') === '1';
-  const m = /^(\d{4})-(\d{2})$/.exec(month ?? '');
-  if (!m) redirect('/admin/calendar');
-  const year = Number(m[1]);
-  const mon = Number(m[2]);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const first = `${year}-${pad(mon)}-01`;
-  const last = `${year}-${pad(mon)}-${pad(new Date(Date.UTC(year, mon, 0)).getUTCDate())}`;
+  if (!first || !last || !isBusinessDateString(first) || !isBusinessDateString(last) || first > last) {
+    redirect(`/admin/calendar?error=${encodeURIComponent('開始・終了の日付を確認してください')}`);
+  }
+  if (addBusinessDays(first, 366) < last) {
+    redirect(`/admin/calendar?month=${first.slice(0, 7)}&error=${encodeURIComponent('一括作成できるのは 1 年分までです')}`);
+  }
+  const month = first.slice(0, 7);
+  // AUTO なら曜日ルール(定休日 → 休業、週末営業の曜日 → 週末営業、それ以外 → 通常営業)
+  const fixedType: EventTypeValue | null = typeInput === AUTO_EVENT_TYPE ? null : eventTypeEnum.parse(typeInput);
+  const settings = await loadSettings();
+  const typeFor = (date: string): EventTypeValue => fixedType ?? suggestEventType(date, settings);
 
   const prisma = db();
 
   // 日ごとに 1 クエリ投げると DB 往復が数十回になり関数がタイムアウトするため、
-  // 「既存を一括取得 → 不足分を一括作成 → 必要人員を一括作成」の 4 クエリに抑える。
+  // 「既存を一括取得 → 不足分を一括作成 → 必要人員を一括作成」の数クエリに抑える。
   const existing = await prisma.businessDay.findMany({
     where: { businessDate: { gte: businessDateToDbValue(first), lte: businessDateToDbValue(last) } },
     select: { businessDate: true },
@@ -133,35 +140,53 @@ export async function bulkCreateDaysAction(form: FormData): Promise<void> {
   }
 
   const created = await prisma.businessDay.createManyAndReturn({
-    data: missing.map((d) => ({ businessDate: businessDateToDbValue(d), eventType })),
-    select: { id: true, businessDate: true },
+    data: missing.map((d) => ({ businessDate: businessDateToDbValue(d), eventType: typeFor(d) })),
+    select: { id: true, businessDate: true, eventType: true },
   });
 
+  // 種別ごとの作成数(結果メッセージ用)
+  const countByType = new Map<EventTypeValue, number>();
+  for (const day of created) countByType.set(day.eventType, (countByType.get(day.eventType) ?? 0) + 1);
+
   let requirementRows = 0;
-  if (expand && eventType !== 'CLOSED') {
-    const templates = await prisma.staffingTemplate.findMany({ where: { eventType }, orderBy: { sortOrder: 'asc' } });
-    if (templates.length > 0) {
-      const rows = created.flatMap((day) => {
-        const businessDate = dbValueToBusinessDate(day.businessDate);
-        const drafts = expandTemplates(
-          businessDate,
-          templates.map((t) => ({ roleNeeded: t.roleNeeded as StaffRole, startTime: t.startTime, endTime: t.endTime, headcount: t.headcount })),
-        );
-        return drafts.map((x) => ({ businessDayId: day.id, ...x }));
-      });
-      if (rows.length > 0) {
-        await prisma.staffingRequirement.createMany({ data: rows });
-        requirementRows = rows.length;
-      }
+  const typesWithoutTemplate: string[] = [];
+  if (expand) {
+    const openTypes = [...countByType.keys()].filter((t) => t !== 'CLOSED');
+    const templates = openTypes.length > 0 ? await prisma.staffingTemplate.findMany({ where: { eventType: { in: openTypes } }, orderBy: { sortOrder: 'asc' } }) : [];
+    const templatesByType = new Map<string, typeof templates>();
+    for (const t of templates) templatesByType.set(t.eventType, [...(templatesByType.get(t.eventType) ?? []), t]);
+    for (const t of openTypes) if (!templatesByType.has(t)) typesWithoutTemplate.push(t);
+
+    const rows = created.flatMap((day) => {
+      const list = templatesByType.get(day.eventType);
+      if (!list || list.length === 0) return [];
+      const businessDate = dbValueToBusinessDate(day.businessDate);
+      const drafts = expandTemplates(
+        businessDate,
+        list.map((t) => ({ roleNeeded: t.roleNeeded as StaffRole, startTime: t.startTime, endTime: t.endTime, headcount: t.headcount })),
+      );
+      return drafts.map((x) => ({ businessDayId: day.id, ...x }));
+    });
+    if (rows.length > 0) {
+      await prisma.staffingRequirement.createMany({ data: rows });
+      requirementRows = rows.length;
     }
   }
 
-  await audit(session, 'businessDay.bulkCreate', 'BusinessDay', null, { month, eventType, created: created.length, requirementRows });
+  await audit(session, 'businessDay.bulkCreate', 'BusinessDay', null, {
+    start: first,
+    end: last,
+    eventType: fixedType ?? AUTO_EVENT_TYPE,
+    created: created.length,
+    byType: Object.fromEntries(countByType),
+    requirementRows,
+  });
   revalidatePath('/admin/calendar');
-  const suffix = expand && eventType !== 'CLOSED'
-    ? requirementRows > 0
-      ? ` / 必要人員 ${requirementRows} 行を展開`
-      : ' / テンプレートが未登録のため必要人員は作成されていません'
-    : '';
-  redirect(`/admin/calendar?month=${month}&ok=${encodeURIComponent(`${created.length} 日を作成しました${suffix}`)}`);
+  const summary = [...countByType.entries()].map(([t, n]) => `${EVENT_TYPE_LABELS[t] ?? t} ${n} 日`).join('・');
+  const parts = [`${created.length} 日を作成しました(${summary})`];
+  if (expand) {
+    if (requirementRows > 0) parts.push(`必要人員 ${requirementRows} 行を展開`);
+    if (typesWithoutTemplate.length > 0) parts.push(`テンプレート未登録: ${typesWithoutTemplate.map((t) => EVENT_TYPE_LABELS[t] ?? t).join('・')}(マスタ > 必要人員テンプレートで登録後「テンプレートから展開」)`);
+  }
+  redirect(`/admin/calendar?month=${month}&ok=${encodeURIComponent(parts.join(' / '))}`);
 }

@@ -7,14 +7,43 @@ import { z } from 'zod';
 
 import { requireAdmin } from '@/lib/auth/session';
 import { audit, db, loadSettings } from '@/lib/db';
+import { TAX_TABLE_TYPES, type TaxTableType } from '@/lib/payroll/deductions';
 import { STAFF_ROLES } from '@/lib/scheduling/types';
 
 const roleEnum = z.enum(STAFF_ROLES as [string, ...string[]]);
 const employmentEnum = z.enum(['PART_TIME', 'FULL_TIME', 'CONTRACT']);
+const taxTableEnum = z.enum(TAX_TABLE_TYPES as [TaxTableType, ...TaxTableType[]]);
 
 function str(form: FormData, key: string): string | undefined {
   const v = form.get(key);
   return typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined;
+}
+
+/** 法定控除に関する入力(スタッフ追加・編集で共通) */
+const deductionFieldsSchema = z.object({
+  taxTableType: taxTableEnum.default('KOU'),
+  dependentsCount: z.coerce.number().int().min(0).default(0),
+  standardMonthlyRemuneration: z.coerce.number().int().min(0).optional(),
+  fixedIncomeTax: z.coerce.number().int().min(0).optional(),
+});
+
+function deductionFieldsFromForm(form: FormData) {
+  const parsed = deductionFieldsSchema.safeParse({
+    taxTableType: str(form, 'taxTableType'),
+    dependentsCount: str(form, 'dependentsCount'),
+    standardMonthlyRemuneration: str(form, 'standardMonthlyRemuneration'),
+    fixedIncomeTax: str(form, 'fixedIncomeTax'),
+  });
+  if (!parsed.success) return null;
+  return {
+    taxTableType: parsed.data.taxTableType,
+    dependentsCount: parsed.data.dependentsCount,
+    standardMonthlyRemuneration: parsed.data.standardMonthlyRemuneration ?? null,
+    fixedIncomeTax: parsed.data.fixedIncomeTax ?? null,
+    socialInsuranceEnrolled: form.get('socialInsuranceEnrolled') === '1',
+    careInsuranceApplicable: form.get('careInsuranceApplicable') === '1',
+    employmentInsuranceEnrolled: form.get('employmentInsuranceEnrolled') === '1',
+  };
 }
 
 function fail(path: string, message: string): never {
@@ -52,6 +81,8 @@ export async function createStaffAction(form: FormData): Promise<void> {
       isMinor: form.get('isMinor') === '1',
     });
   if (!parsed.success) fail('/admin/staff', '入力内容を確認してください: ' + parsed.error.issues.map((i) => i.path.join('.')).join(', '));
+  const deduction = deductionFieldsFromForm(form);
+  if (!deduction) fail('/admin/staff', '法定控除の入力(扶養人数など)を確認してください');
 
   const data = parsed.data;
   const staff = await db().staff.create({
@@ -64,6 +95,7 @@ export async function createStaffAction(form: FormData): Promise<void> {
       monthlySalary: data.monthlySalary ?? null,
       hiredAt: data.hiredAt ? new Date(`${data.hiredAt}T00:00:00Z`) : null,
       isMinor: data.isMinor,
+      ...deduction,
       wageHistories:
         data.hourlyWage > 0
           ? { create: { hourlyWage: data.hourlyWage, effectiveFrom: businessDateToDbValue(data.hiredAt ?? toBusinessDate(new Date())) } }
@@ -101,6 +133,8 @@ export async function updateStaffAction(form: FormData): Promise<void> {
       authUserId: str(form, 'authUserId'),
     });
   if (!parsed.success) fail(`/admin/staff/${id}`, '入力内容を確認してください');
+  const deduction = deductionFieldsFromForm(form);
+  if (!deduction) fail(`/admin/staff/${id}`, '法定控除の入力(扶養人数・標準報酬月額・固定税額)を確認してください');
   const d = parsed.data;
   await db().staff.update({
     where: { id },
@@ -116,6 +150,7 @@ export async function updateStaffAction(form: FormData): Promise<void> {
       isMinor: form.get('isMinor') === '1',
       isActive: form.get('isActive') === '1',
       skills: skillsFromForm(form) ?? {},
+      ...deduction,
     },
   });
   await audit(session, 'staff.update', 'Staff', id, { name: d.name });

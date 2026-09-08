@@ -7,7 +7,9 @@
  * - 労働分数 = clockOut − clockIn − 休憩(承認済み TimeRecord のみ)
  * - 適用時給は WageHistory から勤務日時点の値を引く(Staff.hourlyWage は使わない)
  * - 深夜割増: 22:00〜翌5:00 の分数を分単位で判定し 25% を加算。日またぎ勤務に対応
- * - 総支給 = 基本給 + 深夜割増 + インセンティブ、差引支給 = 総支給 − 日払い
+ * - 総支給 = 基本給 + 深夜割増 + インセンティブ
+ * - 法定控除(健保・介護・厚年・雇用保険・源泉所得税)は deductions.ts で計算し、
+ *   差引支給 = 総支給 − 法定控除 − 日払い
  * - 月給制社員は固定額のみ計上(深夜割増なし)
  */
 import {
@@ -17,6 +19,7 @@ import {
 } from '@sakura-cross/business-date';
 
 import type { ShiftPayrollSettings } from '../settings';
+import { computeDeductions } from './deductions';
 import type {
   AdvancePaymentInput,
   ComputePayrollInput,
@@ -344,7 +347,11 @@ export function computePayroll(input: ComputePayrollInput): PayrollResult {
     const incentivePay = sum(incentives.map((i) => i.amount));
     const advanceDeduction = sum(advances.map((a) => a.amount));
     const grossPay = basePay + nightPremiumPay + incentivePay;
-    const netPay = grossPay - advanceDeduction;
+
+    // 法定控除(社会保険・雇用保険・所得税)。所得税の表は期間終了日の年で切り替える
+    const deductions = computeDeductions({ grossPay, staff, settings, year: Number(period.end.slice(0, 4)) });
+    warnings.push(...deductions.warnings);
+    const netPay = grossPay - deductions.totalDeductions - advanceDeduction;
 
     items.push({
       staffId: staff.id,
@@ -358,6 +365,14 @@ export function computePayroll(input: ComputePayrollInput): PayrollResult {
       incentivePay,
       advanceDeduction,
       grossPay,
+      healthInsurance: deductions.healthInsurance,
+      careInsurance: deductions.careInsurance,
+      pensionInsurance: deductions.pensionInsurance,
+      employmentInsurance: deductions.employmentInsurance,
+      incomeTax: deductions.incomeTax,
+      standardMonthlyRemuneration: deductions.standardMonthlyRemuneration,
+      taxableIncome: deductions.taxableIncome,
+      totalDeductions: deductions.totalDeductions,
       netPay,
       breakdown,
       incentives,

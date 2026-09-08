@@ -17,9 +17,17 @@ export default async function PayrollRunPage({ params, searchParams }: { params:
   if (!run) notFound();
   const start = bd(run.periodStart);
   const end = bd(run.periodEnd);
+  const deductionsOf = (i: { healthInsurance: number; careInsurance: number; pensionInsurance: number; employmentInsurance: number; incomeTax: number }) =>
+    i.healthInsurance + i.careInsurance + i.pensionInsurance + i.employmentInsurance + i.incomeTax;
   const totals = run.items.reduce(
-    (acc, i) => ({ gross: acc.gross + i.grossPay, net: acc.net + i.netPay, minutes: acc.minutes + i.totalMinutes, night: acc.night + i.nightMinutes }),
-    { gross: 0, net: 0, minutes: 0, night: 0 },
+    (acc, i) => ({
+      gross: acc.gross + i.grossPay,
+      deductions: acc.deductions + deductionsOf(i),
+      net: acc.net + i.netPay,
+      minutes: acc.minutes + i.totalMinutes,
+      night: acc.night + i.nightMinutes,
+    }),
+    { gross: 0, deductions: 0, net: 0, minutes: 0, night: 0 },
   );
 
   return (
@@ -92,6 +100,10 @@ export default async function PayrollRunPage({ params, searchParams }: { params:
           <div className="stat">{yen(totals.gross)}</div>
         </div>
         <div className="card" style={{ marginBottom: 0 }}>
+          <div className="muted small">法定控除合計(社保・雇用保険・所得税)</div>
+          <div className="stat">{yen(totals.deductions)}</div>
+        </div>
+        <div className="card" style={{ marginBottom: 0 }}>
           <div className="muted small">差引支給合計</div>
           <div className="stat">{yen(totals.net)}</div>
         </div>
@@ -110,37 +122,48 @@ export default async function PayrollRunPage({ params, searchParams }: { params:
               <th className="num">深夜割増</th>
               <th className="num">インセンティブ</th>
               <th className="num">総支給</th>
+              <th className="num">社会保険料</th>
+              <th className="num">雇用保険</th>
+              <th className="num">所得税</th>
               <th className="num">日払い控除</th>
               <th className="num">差引支給</th>
               <th>注記</th>
             </tr>
           </thead>
           <tbody>
-            {run.items.map((i) => (
-              <tr key={i.id}>
-                <td>{i.staff.name}</td>
-                <td>{EMPLOYMENT_LABELS[i.staff.employmentType]}</td>
-                <td className="num">{minutesToHours(i.totalMinutes)}</td>
-                <td className="num">{minutesToHours(i.nightMinutes)}</td>
-                <td className="num">{i.monthlySalary ? `${yen(i.basePay)}(月給)` : yen(i.basePay)}</td>
-                <td className="num">{yen(i.nightPremiumPay)}</td>
-                <td className="num">{yen(i.incentivePay)}</td>
-                <td className="num">
-                  <strong>{yen(i.grossPay)}</strong>
-                </td>
-                <td className="num">{i.advanceDeduction ? `-${yen(i.advanceDeduction)}` : '—'}</td>
-                <td className="num">
-                  <strong>{yen(i.netPay)}</strong>
-                </td>
-                <td className="small" style={{ color: 'var(--danger)' }}>
-                  {i.warnings.join(' / ')}
-                </td>
-              </tr>
-            ))}
+            {run.items.map((i) => {
+              const social = i.healthInsurance + i.careInsurance + i.pensionInsurance;
+              return (
+                <tr key={i.id}>
+                  <td>{i.staff.name}</td>
+                  <td>{EMPLOYMENT_LABELS[i.staff.employmentType]}</td>
+                  <td className="num">{minutesToHours(i.totalMinutes)}</td>
+                  <td className="num">{minutesToHours(i.nightMinutes)}</td>
+                  <td className="num">{i.monthlySalary ? `${yen(i.basePay)}(月給)` : yen(i.basePay)}</td>
+                  <td className="num">{yen(i.nightPremiumPay)}</td>
+                  <td className="num">{yen(i.incentivePay)}</td>
+                  <td className="num">
+                    <strong>{yen(i.grossPay)}</strong>
+                  </td>
+                  <td className="num" title={`健保 ${yen(i.healthInsurance)} / 介護 ${yen(i.careInsurance)} / 厚年 ${yen(i.pensionInsurance)}`}>
+                    {social ? `-${yen(social)}` : '—'}
+                  </td>
+                  <td className="num">{i.employmentInsurance ? `-${yen(i.employmentInsurance)}` : '—'}</td>
+                  <td className="num">{i.incomeTax ? `-${yen(i.incomeTax)}` : '—'}</td>
+                  <td className="num">{i.advanceDeduction ? `-${yen(i.advanceDeduction)}` : '—'}</td>
+                  <td className="num">
+                    <strong>{yen(i.netPay)}</strong>
+                  </td>
+                  <td className="small" style={{ color: 'var(--danger)' }}>
+                    {i.warnings.join(' / ')}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
         <p className="muted small" style={{ marginTop: 8 }}>
-          所得税・社会保険・雇用保険の控除は含みません。CSV を給与ソフト/社労士へ渡してください。
+          社会保険料(健康保険・介護保険・厚生年金)は標準報酬月額 × 料率 ÷ 2、雇用保険は総支給 × 本人負担率、源泉所得税は課税対象額(総支給 − 社会保険料等)に対する電算機計算の特例(甲欄)で算出しています。住民税は含みません。
         </p>
       </div>
 
@@ -149,8 +172,38 @@ export default async function PayrollRunPage({ params, searchParams }: { params:
         return (
           <details key={i.id} className="card">
             <summary style={{ cursor: 'pointer' }}>
-              <strong>{i.staff.name}</strong> の日別内訳({breakdown.days.length} 日)
+              <strong>{i.staff.name}</strong> の日別内訳({breakdown.days.length} 日)・控除の内訳
             </summary>
+            <table className="data" style={{ marginTop: 8, maxWidth: 720 }}>
+              <tbody>
+                <tr>
+                  <th>標準報酬月額</th>
+                  <td className="num">{i.standardMonthlyRemuneration ? yen(i.standardMonthlyRemuneration) : '—(社会保険未加入)'}</td>
+                  <th>健康保険料</th>
+                  <td className="num">{yen(i.healthInsurance)}</td>
+                </tr>
+                <tr>
+                  <th>介護保険料</th>
+                  <td className="num">{yen(i.careInsurance)}</td>
+                  <th>厚生年金保険料</th>
+                  <td className="num">{yen(i.pensionInsurance)}</td>
+                </tr>
+                <tr>
+                  <th>雇用保険料</th>
+                  <td className="num">{yen(i.employmentInsurance)}</td>
+                  <th>課税対象額(総支給 − 社会保険料等)</th>
+                  <td className="num">{yen(i.taxableIncome)}</td>
+                </tr>
+                <tr>
+                  <th>源泉所得税</th>
+                  <td className="num">{yen(i.incomeTax)}</td>
+                  <th>法定控除合計</th>
+                  <td className="num">
+                    <strong>{yen(deductionsOf(i))}</strong>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
             <table className="data" style={{ marginTop: 8 }}>
               <thead>
                 <tr>

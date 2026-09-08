@@ -56,6 +56,59 @@ export function SettingsForm({ settings }: { settings: ShiftPayrollSettings }) {
       </div>
 
       <div className="card">
+        <h2>社会保険・所得税(法定控除)</h2>
+        <p className="muted small">
+          料率は労使合計を入力し、本人負担分(1/2)を給与から控除します。健康保険・介護保険は協会けんぽの都道府県別料率(毎年 3 月改定)、雇用保険は本人負担分の料率(毎年 4 月改定)を入力してください。
+          所得税は国税庁の「電算機計算の特例」(甲欄)で自動計算します。加入の有無・扶養人数・標準報酬月額はスタッフごとに設定します。
+        </p>
+        <div className="grid-3">
+          <label className="field">
+            健康保険料率(労使合計。例 0.0991 = 9.91%)
+            <input name="healthInsuranceRate" type="number" step="0.0001" min={0} max={1} defaultValue={settings.healthInsuranceRate} />
+          </label>
+          <label className="field">
+            介護保険料率(労使合計。40〜64 歳。例 0.0159)
+            <input name="careInsuranceRate" type="number" step="0.0001" min={0} max={1} defaultValue={settings.careInsuranceRate} />
+          </label>
+          <label className="field">
+            厚生年金保険料率(労使合計。例 0.183)
+            <input name="pensionInsuranceRate" type="number" step="0.0001" min={0} max={1} defaultValue={settings.pensionInsuranceRate} />
+          </label>
+          <label className="field">
+            雇用保険料率(本人負担分。例 0.0055 = 0.55%)
+            <input name="employmentInsuranceWorkerRate" type="number" step="0.0001" min={0} max={1} defaultValue={settings.employmentInsuranceWorkerRate} />
+          </label>
+        </div>
+      </div>
+
+      <div className="card">
+        <h2>営業カレンダー(曜日ルール)</h2>
+        <p className="muted small">カレンダーの「未登録日を一括作成」で使う既定の種別です。定休日は「休業」、週末営業の曜日は「週末営業」、それ以外は「通常営業」になります(定休日が優先)。</p>
+        <div className="grid-2">
+          <div className="field">
+            <span>定休日</span>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              {WEEKDAYS.map((w, i) => (
+                <label key={i} style={{ fontSize: 13 }}>
+                  <input type="checkbox" name="closedWeekdays" value={i} defaultChecked={settings.closedWeekdays.includes(i)} /> {w}
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className="field">
+            <span>週末営業の曜日</span>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              {WEEKDAYS.map((w, i) => (
+                <label key={i} style={{ fontSize: 13 }}>
+                  <input type="checkbox" name="weekendWeekdays" value={i} defaultChecked={settings.weekendWeekdays.includes(i)} /> {w}
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
         <h2>打刻の丸め・休憩</h2>
         <div className="grid-3">
           <label className="field">

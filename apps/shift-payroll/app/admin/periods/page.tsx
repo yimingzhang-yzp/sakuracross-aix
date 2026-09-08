@@ -13,23 +13,16 @@ export default async function PeriodsPage({ searchParams }: { searchParams: Prom
     searchParams,
   ]);
 
-  // 次の半月を既定値として提案
+  // 今月の初日〜末日を既定値として提案
   const today = toBusinessDate(new Date());
-  const [y, m, d] = today.split('-').map(Number) as [number, number, number];
+  const [y, m] = today.split('-').map(Number) as [number, number];
   const pad = (n: number) => String(n).padStart(2, '0');
-  const lastDay = (yy: number, mm: number) => new Date(Date.UTC(yy, mm, 0)).getUTCDate();
-  let suggestStart: string;
-  let suggestEnd: string;
-  if (d <= 15) {
-    suggestStart = `${y}-${pad(m)}-16`;
-    suggestEnd = `${y}-${pad(m)}-${pad(lastDay(y, m))}`;
-  } else {
-    const ny = m === 12 ? y + 1 : y;
-    const nm = m === 12 ? 1 : m + 1;
-    suggestStart = `${ny}-${pad(nm)}-01`;
-    suggestEnd = `${ny}-${pad(nm)}-15`;
-  }
-  const suggestDeadline = addBusinessDays(suggestStart, -5);
+  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const suggestStart = `${y}-${pad(m)}-01`;
+  const suggestEnd = `${y}-${pad(m)}-${pad(lastDay)}`;
+  // 締切は開始 5 日前。既に過ぎていれば今日にする
+  const fiveDaysBefore = addBusinessDays(suggestStart, -5);
+  const suggestDeadline = fiveDaysBefore < today ? today : fiveDaysBefore;
 
   return (
     <>

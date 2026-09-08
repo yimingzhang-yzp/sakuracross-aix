@@ -62,6 +62,18 @@ export const shiftPayrollSettingsSchema = z.object({
   csvEncoding: z.enum(['utf8-bom', 'sjis']).default('utf8-bom'),
   /** 欠員募集の応募受付期限(募集開始から N 時間。0 = 無期限) */
   openShiftExpireHours: z.coerce.number().int().min(0).default(0),
+  /** 定休日の曜日(0=日 … 6=土)。カレンダーの一括作成で自動的に「休業」になる */
+  closedWeekdays: z.array(z.coerce.number().int().min(0).max(6)).default([0, 1]),
+  /** 週末営業の曜日(0=日 … 6=土)。一括作成で自動的に「週末営業」になる(定休日が優先) */
+  weekendWeekdays: z.array(z.coerce.number().int().min(0).max(6)).default([5, 6, 0]),
+  /** 健康保険料率(労使合計。協会けんぽ 東京支部 令和7年度 9.91%) */
+  healthInsuranceRate: z.coerce.number().min(0).max(1).default(0.0991),
+  /** 介護保険料率(労使合計。40〜64歳の被保険者。令和7年度 1.59%) */
+  careInsuranceRate: z.coerce.number().min(0).max(1).default(0.0159),
+  /** 厚生年金保険料率(労使合計 18.3%) */
+  pensionInsuranceRate: z.coerce.number().min(0).max(1).default(0.183),
+  /** 雇用保険料率(被保険者負担分。一般の事業 令和7年度 0.55%) */
+  employmentInsuranceWorkerRate: z.coerce.number().min(0).max(1).default(0.0055),
 });
 
 export type ShiftPayrollSettings = z.infer<typeof shiftPayrollSettingsSchema>;
@@ -108,4 +120,10 @@ export const SETTING_LABELS: Record<keyof ShiftPayrollSettings, string> = {
   preferenceReminderDaysBefore: 'リマインド(締切の N 日前)',
   csvEncoding: 'CSV 文字コード',
   openShiftExpireHours: '募集の受付期限(時間)',
+  closedWeekdays: '定休日の曜日',
+  weekendWeekdays: '週末営業の曜日',
+  healthInsuranceRate: '健康保険料率(労使合計)',
+  careInsuranceRate: '介護保険料率(労使合計)',
+  pensionInsuranceRate: '厚生年金保険料率(労使合計)',
+  employmentInsuranceWorkerRate: '雇用保険料率(本人負担)',
 };

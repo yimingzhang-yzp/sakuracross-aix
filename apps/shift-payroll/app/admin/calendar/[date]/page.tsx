@@ -2,8 +2,9 @@ import { businessDateToDbValue, isBusinessDateString } from '@sakura-cross/busin
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
-import { db } from '@/lib/db';
+import { db, loadSettings } from '@/lib/db';
 import { businessDateLabel, EVENT_TYPE_LABELS, hhmm, SHIFT_STATUS_LABELS, timeRange } from '@/lib/format';
+import { EVENT_TYPES, suggestEventType } from '@/lib/scheduling/day-type';
 import { STAFF_ROLE_LABELS, STAFF_ROLES } from '@/lib/scheduling/types';
 
 import { addRequirementAction, deleteRequirementAction, expandTemplateAction, upsertBusinessDayAction } from '../actions';
@@ -19,14 +20,19 @@ export default async function BusinessDayPage({
   const query = await searchParams;
   if (!isBusinessDateString(date)) notFound();
 
-  const day = await db().businessDay.findUnique({
-    where: { businessDate: businessDateToDbValue(date) },
-    include: {
-      staffingRequirements: { orderBy: [{ startTime: 'asc' }, { roleNeeded: 'asc' }] },
-      shiftAssignments: { include: { staff: true }, orderBy: [{ plannedStart: 'asc' }] },
-      openShiftRequests: { where: { status: 'OPEN' } },
-    },
-  });
+  const [day, settings] = await Promise.all([
+    db().businessDay.findUnique({
+      where: { businessDate: businessDateToDbValue(date) },
+      include: {
+        staffingRequirements: { orderBy: [{ startTime: 'asc' }, { roleNeeded: 'asc' }] },
+        shiftAssignments: { include: { staff: true }, orderBy: [{ plannedStart: 'asc' }] },
+        openShiftRequests: { where: { status: 'OPEN' } },
+      },
+    }),
+    loadSettings(),
+  ]);
+  // 未登録日は曜日ルールから種別を提案する
+  const suggested = suggestEventType(date, settings);
 
   return (
     <>
@@ -46,13 +52,14 @@ export default async function BusinessDayPage({
           <div className="grid-3">
             <label className="field">
               種別
-              <select name="eventType" defaultValue={day?.eventType ?? 'NORMAL'}>
-                {Object.entries(EVENT_TYPE_LABELS).map(([k, v]) => (
+              <select name="eventType" defaultValue={day?.eventType ?? suggested}>
+                {EVENT_TYPES.map((k) => (
                   <option key={k} value={k}>
-                    {v}
+                    {EVENT_TYPE_LABELS[k]}
                   </option>
                 ))}
               </select>
+              {!day ? <span className="muted small">曜日ルールの提案: {EVENT_TYPE_LABELS[suggested]}</span> : null}
             </label>
             <label className="field">
               イベント名

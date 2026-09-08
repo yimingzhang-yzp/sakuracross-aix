@@ -2,6 +2,7 @@ import Link from 'next/link';
 
 import { db, loadSettings } from '@/lib/db';
 import { EMPLOYMENT_LABELS, yen } from '@/lib/format';
+import { TAX_TABLE_LABELS, TAX_TABLE_TYPES } from '@/lib/payroll/deductions';
 import { isNewcomer } from '@/lib/scheduling/generate';
 import { STAFF_ROLE_LABELS, STAFF_ROLES } from '@/lib/scheduling/types';
 
@@ -181,6 +182,33 @@ export default async function StaffListPage({ searchParams }: { searchParams: Pr
             <label className="field">
               <span>
                 <input type="checkbox" name="isMinor" value="1" /> 18 歳未満(22 時以降のシフト不可)
+              </span>
+            </label>
+          </div>
+          <div className="muted small" style={{ marginTop: 4 }}>
+            法定控除(給与計算)— 加入状況は追加後にスタッフ詳細で変更できます
+          </div>
+          <div className="grid-3">
+            <label className="field">
+              源泉所得税の区分
+              <select name="taxTableType" defaultValue="KOU">
+                {TAX_TABLE_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {TAX_TABLE_LABELS[t]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              扶養親族等の数(甲欄)
+              <input name="dependentsCount" type="number" min={0} defaultValue={0} />
+            </label>
+            <label className="field">
+              <span>
+                <input type="checkbox" name="socialInsuranceEnrolled" value="1" /> 健康保険・厚生年金に加入
+              </span>
+              <span>
+                <input type="checkbox" name="employmentInsuranceEnrolled" value="1" /> 雇用保険に加入
               </span>
             </label>
           </div>

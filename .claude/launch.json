@@ -2,6 +2,12 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "shift-payroll",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--workspace=@sakura-cross/shift-payroll"],
+      "port": 3001
+    },
+    {
       "name": "ai-boss",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--workspace=@sakura-cross/ai-boss"],

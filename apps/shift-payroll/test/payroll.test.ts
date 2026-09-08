@@ -201,6 +201,51 @@ describe('受け入れ基準: 日払い 5,000 円の控除', () => {
   });
 });
 
+describe('法定控除が差引支給に反映される', () => {
+  it('社保・雇用保険加入の社員: 差引 = 月給 − 社会保険料 − 雇用保険料 − 所得税 − 日払い', () => {
+    const insured: PayrollStaffInput = {
+      ...salaried,
+      socialInsuranceEnrolled: true,
+      employmentInsuranceEnrolled: true,
+      standardMonthlyRemuneration: 280_000,
+      taxTableType: 'KOU',
+      dependentsCount: 0,
+    };
+    const result = computePayroll({
+      period: { start: '2026-08-01', end: '2026-08-31' },
+      staff: [insured],
+      timeRecords: [],
+      wageHistories: [],
+      incentives: [],
+      advancePayments: [{ staffId: insured.id, businessDate: '2026-08-10', amount: 10_000 }],
+      settings,
+    });
+    const item = result.items[0]!;
+    expect(item.grossPay).toBe(280_000);
+    expect(item.healthInsurance).toBe(13_874);
+    expect(item.pensionInsurance).toBe(25_620);
+    expect(item.employmentInsurance).toBe(1_540);
+    expect(item.incomeTax).toBe(4_460);
+    expect(item.totalDeductions).toBe(45_494);
+    expect(item.netPay).toBe(280_000 - 45_494 - 10_000);
+  });
+
+  it('控除の警告(標準報酬月額の推定)は明細の警告に含まれる', () => {
+    const insured: PayrollStaffInput = { ...salaried, socialInsuranceEnrolled: true };
+    const result = computePayroll({
+      period: { start: '2026-08-01', end: '2026-08-31' },
+      staff: [insured],
+      timeRecords: [],
+      wageHistories: [],
+      incentives: [],
+      advancePayments: [],
+      settings,
+    });
+    expect(result.items[0]!.standardMonthlyRemuneration).toBe(280_000);
+    expect(result.items[0]!.warnings.join()).toContain('標準報酬月額が未設定');
+  });
+});
+
 describe('受け入れ基準: FINALIZED 期間の編集ブロック', () => {
   const finalized = [{ id: 'run-1', periodStart: '2025-01-01', periodEnd: '2025-01-31' }];
 
@@ -421,9 +466,10 @@ describe('CSV 出力', () => {
     });
     const csv = buildPayrollCsv(result.period, result.items);
     const lines = csv.split('\r\n');
-    expect(lines[0]).toBe('スタッフ名,雇用形態,総労働時間,深夜時間,基本給,深夜割増,インセンティブ,総支給,控除(日払い),差引支給');
-    expect(lines[1]).toBe('山田 花子,アルバイト,8:00,6:00,10400,1950,2000,14350,5000,9350');
-    expect(csv).toContain('所得税・社会保険');
+    expect(lines[0]).toBe('スタッフ名,雇用形態,総労働時間,深夜時間,基本給,深夜割増,インセンティブ,総支給,健康保険,介護保険,厚生年金,雇用保険,所得税,控除合計,控除(日払い),差引支給');
+    // 未加入のアルバイト・課税対象額 14,350 円なので法定控除はすべて 0
+    expect(lines[1]).toBe('山田 花子,アルバイト,8:00,6:00,10400,1950,2000,14350,0,0,0,0,0,0,5000,9350');
+    expect(csv).toContain('電算機計算の特例');
   });
 
   it('formatMinutesAsHours', () => {

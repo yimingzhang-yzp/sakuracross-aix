@@ -57,6 +57,7 @@ export const EMPLOYMENT_LABELS: Record<string, string> = {
 
 export const EVENT_TYPE_LABELS: Record<string, string> = {
   NORMAL: '通常営業',
+  WEEKEND: '週末営業',
   BIG_EVENT: 'ビッグイベント',
   RENTAL: '貸切',
   CLOSED: '休業',

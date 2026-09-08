@@ -10,7 +10,7 @@ import { expandTemplates } from '@/lib/scheduling/templates';
 import { STAFF_ROLES, type StaffRole } from '@/lib/scheduling/types';
 
 const schema = z.object({
-  eventType: z.enum(['NORMAL', 'BIG_EVENT', 'RENTAL', 'CLOSED']),
+  eventType: z.enum(['NORMAL', 'WEEKEND', 'BIG_EVENT', 'RENTAL', 'CLOSED']),
   roleNeeded: z.enum(STAFF_ROLES as [string, ...string[]]),
   startTime: z.string().regex(/^\d{2}:\d{2}$/),
   endTime: z.string().regex(/^\d{2}:\d{2}$/),

@@ -1,7 +1,8 @@
 /**
  * 給与 CSV(会計・給与ソフト取込用の汎用フォーマット)
- * 列: スタッフ名, 雇用形態, 総労働時間, 深夜時間, 基本給, 深夜割増, インセンティブ, 総支給, 控除(日払い), 差引支給
- * 文字コードは設定(UTF-8 BOM / Shift_JIS)。所得税・社会保険は計算しない旨を末尾に注記する。
+ * 列: スタッフ名, 雇用形態, 総労働時間, 深夜時間, 基本給, 深夜割増, インセンティブ, 総支給,
+ *     健康保険, 介護保険, 厚生年金, 雇用保険, 所得税, 控除合計, 控除(日払い), 差引支給
+ * 文字コードは設定(UTF-8 BOM / Shift_JIS)。
  */
 import type { PayrollItemDraft, PayrollPeriod } from './types';
 
@@ -14,6 +15,12 @@ export const PAYROLL_CSV_HEADERS = [
   '深夜割増',
   'インセンティブ',
   '総支給',
+  '健康保険',
+  '介護保険',
+  '厚生年金',
+  '雇用保険',
+  '所得税',
+  '控除合計',
   '控除(日払い)',
   '差引支給',
 ] as const;
@@ -49,6 +56,12 @@ export function buildPayrollCsv(period: PayrollPeriod, items: PayrollItemDraft[]
         item.nightPremiumPay,
         item.incentivePay,
         item.grossPay,
+        item.healthInsurance,
+        item.careInsurance,
+        item.pensionInsurance,
+        item.employmentInsurance,
+        item.incomeTax,
+        item.totalDeductions,
         item.advanceDeduction,
         item.netPay,
       ]
@@ -58,6 +71,6 @@ export function buildPayrollCsv(period: PayrollPeriod, items: PayrollItemDraft[]
   }
   lines.push('');
   lines.push(escapeCsv(`# 対象期間 ${period.start}〜${period.end}`));
-  lines.push(escapeCsv('# 所得税・社会保険・雇用保険の控除は含みません(給与ソフト/社労士側で計算してください)'));
+  lines.push(escapeCsv('# 社会保険料・雇用保険料は設定の料率、所得税は電算機計算の特例(甲欄)で算出。住民税は含みません'));
   return lines.join('\r\n') + '\r\n';
 }

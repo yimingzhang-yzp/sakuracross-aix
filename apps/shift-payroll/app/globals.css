@@ -394,6 +394,9 @@ input[type='checkbox'] {
 .calendar .day.closed {
   background: #f1f5f9;
 }
+.calendar .day.weekend {
+  background: #dbeafe;
+}
 .calendar .day.big {
   background: #fef3c7;
 }

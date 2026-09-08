@@ -4,7 +4,7 @@ import { STAFF_ROLE_LABELS, STAFF_ROLES } from '@/lib/scheduling/types';
 
 import { addTemplateRowAction, deleteTemplateRowAction } from './actions';
 
-const EVENT_TYPES = ['NORMAL', 'BIG_EVENT', 'RENTAL'] as const;
+const EVENT_TYPES = ['NORMAL', 'WEEKEND', 'BIG_EVENT', 'RENTAL'] as const;
 
 export default async function TemplatesPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
   const [rows, params] = await Promise.all([

@@ -5,6 +5,7 @@ import { identifyLiffRequest, resolveStaff, unauthorized } from '@/lib/liff/auth
 
 export const dynamic = 'force-dynamic';
 
+/** 本人の確定済み明細を新しい順に返す(過去分も一覧できるよう最大 60 か月) */
 export async function GET(request: Request): Promise<Response> {
   const identity = await identifyLiffRequest(request);
   if (!identity) return unauthorized();
@@ -15,7 +16,7 @@ export async function GET(request: Request): Promise<Response> {
     where: { staffId: staff.id, payrollRun: { status: 'FINALIZED' } },
     include: { payrollRun: true },
     orderBy: { payrollRun: { periodStart: 'desc' } },
-    take: 12,
+    take: 60,
   });
   return Response.json({
     payslips: items.map((i) => ({
@@ -29,6 +30,14 @@ export async function GET(request: Request): Promise<Response> {
       nightPremiumPay: i.nightPremiumPay,
       incentivePay: i.incentivePay,
       grossPay: i.grossPay,
+      healthInsurance: i.healthInsurance,
+      careInsurance: i.careInsurance,
+      pensionInsurance: i.pensionInsurance,
+      employmentInsurance: i.employmentInsurance,
+      incomeTax: i.incomeTax,
+      totalDeductions: i.healthInsurance + i.careInsurance + i.pensionInsurance + i.employmentInsurance + i.incomeTax,
+      standardMonthlyRemuneration: i.standardMonthlyRemuneration,
+      taxableIncome: i.taxableIncome,
       advanceDeduction: i.advanceDeduction,
       netPay: i.netPay,
       monthlySalary: i.monthlySalary,

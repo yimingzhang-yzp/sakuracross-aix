@@ -48,6 +48,13 @@ export async function saveSettingsAction(form: FormData): Promise<void> {
       .filter(Boolean),
     csvEncoding: str(form, 'csvEncoding'),
     openShiftExpireHours: str(form, 'openShiftExpireHours'),
+    // チェックボックス群は getAll で受ける(未チェックなら空配列 = ルールなし)
+    closedWeekdays: form.getAll('closedWeekdays').filter((v): v is string => typeof v === 'string'),
+    weekendWeekdays: form.getAll('weekendWeekdays').filter((v): v is string => typeof v === 'string'),
+    healthInsuranceRate: str(form, 'healthInsuranceRate'),
+    careInsuranceRate: str(form, 'careInsuranceRate'),
+    pensionInsuranceRate: str(form, 'pensionInsuranceRate'),
+    employmentInsuranceWorkerRate: str(form, 'employmentInsuranceWorkerRate'),
   };
 
   try {

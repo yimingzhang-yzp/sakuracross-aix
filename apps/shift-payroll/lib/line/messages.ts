@@ -143,13 +143,41 @@ export function openShiftFlexMessage(card: OpenShiftCard): LineMessage {
 export function payslipMessage(
   staffName: string,
   periodLabel: string,
-  item: { grossPay: number; netPay: number; basePay: number; nightPremiumPay: number; incentivePay: number; advanceDeduction: number; totalMinutes: number },
+  item: {
+    grossPay: number;
+    netPay: number;
+    basePay: number;
+    nightPremiumPay: number;
+    incentivePay: number;
+    advanceDeduction: number;
+    totalMinutes: number;
+    healthInsurance: number;
+    careInsurance: number;
+    pensionInsurance: number;
+    employmentInsurance: number;
+    incomeTax: number;
+  },
 ): LineMessage {
   const h = Math.floor(item.totalMinutes / 60);
   const m = item.totalMinutes % 60;
-  return text(
-    `${staffName}さんの給与明細(${periodLabel})が確定しました。\n\n労働時間: ${h}時間${m}分\n基本給: ${yen(item.basePay)}\n深夜割増: ${yen(item.nightPremiumPay)}\nインセンティブ: ${yen(item.incentivePay)}\n総支給: ${yen(item.grossPay)}\n日払い控除: -${yen(item.advanceDeduction)}\n差引支給: ${yen(item.netPay)}\n\n※所得税・社会保険は含みません。詳細: ${liffUrl('payslip')}`,
-  );
+  const social = item.healthInsurance + item.careInsurance + item.pensionInsurance;
+  const lines = [
+    `${staffName}さんの給与明細(${periodLabel})が確定しました。`,
+    '',
+    `労働時間: ${h}時間${m}分`,
+    `基本給: ${yen(item.basePay)}`,
+    `深夜割増: ${yen(item.nightPremiumPay)}`,
+    `インセンティブ: ${yen(item.incentivePay)}`,
+    `総支給: ${yen(item.grossPay)}`,
+    social > 0 ? `社会保険料: -${yen(social)}` : null,
+    item.employmentInsurance > 0 ? `雇用保険料: -${yen(item.employmentInsurance)}` : null,
+    `所得税: -${yen(item.incomeTax)}`,
+    item.advanceDeduction > 0 ? `日払い控除: -${yen(item.advanceDeduction)}` : null,
+    `差引支給: ${yen(item.netPay)}`,
+    '',
+    `内訳・過去の明細: ${liffUrl('payslip')}`,
+  ].filter((l): l is string => l !== null);
+  return text(lines.join('\n'));
 }
 
 export function openShiftResultMessage(won: boolean, card: Pick<OpenShiftCard, 'businessDate' | 'role' | 'start' | 'end'>): LineMessage {

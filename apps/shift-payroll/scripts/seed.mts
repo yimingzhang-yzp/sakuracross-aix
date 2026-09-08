@@ -7,7 +7,7 @@
  * - 設定値(AppSetting)
  * - スタッフ 10 名(社員2・未成年1・新人2 を含む)+ 時給履歴(1 名は月途中で改定)
  * - イベント種別ごとの必要人員テンプレート
- * - 当月+翌月の営業日(月火は休業、金土はイベント)と必要人員
+ * - 当月+翌月の営業日(設定の曜日ルール: 日月は休業、金土は週末営業。土曜の一部はビッグイベント)と必要人員
  * - 半月単位のシフト期間 2 つと希望シフト
  * - 前月の勤怠実績(承認済み)・日払い・インセンティブ(給与計算デモ用)
  */
@@ -19,6 +19,7 @@ import { getPrisma, disconnectPrisma } from '@sakura-cross/shared-db';
 import { config as loadEnv } from 'dotenv';
 
 import { DEFAULT_SETTINGS, SETTINGS_KEY } from '../lib/settings';
+import { type EventTypeValue, suggestEventType } from '../lib/scheduling/day-type';
 import { expandTemplates } from '../lib/scheduling/templates';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -51,20 +52,29 @@ const STAFF: Array<{
   hiredAt: Date;
   accessRole?: 'ADMIN' | 'STAFF';
   lineUserId?: string;
+  /** 法定控除(省略時: 甲欄・扶養 0・未加入) */
+  deduction?: {
+    taxTableType?: 'KOU' | 'OTSU' | 'NONE';
+    dependentsCount?: number;
+    socialInsuranceEnrolled?: boolean;
+    careInsuranceApplicable?: boolean;
+    employmentInsuranceEnrolled?: boolean;
+    standardMonthlyRemuneration?: number;
+  };
 }> = [
-  { n: 1, name: '高橋 健', nameKana: 'タカハシ ケン', role: 'MANAGER', employmentType: 'FULL_TIME', hourlyWage: 0, monthlySalary: 320_000, hiredAt: new Date('2019-04-01'), accessRole: 'ADMIN', skills: { floor_vip: true, bartender: true }, lineUserId: 'Udev-manager' },
-  { n: 2, name: '佐藤 美咲', nameKana: 'サトウ ミサキ', role: 'FLOOR_VIP', employmentType: 'FULL_TIME', hourlyWage: 0, monthlySalary: 280_000, hiredAt: new Date('2021-07-01'), skills: { reception: true } },
-  { n: 3, name: '鈴木 大輔', nameKana: 'スズキ ダイスケ', role: 'BARTENDER', employmentType: 'PART_TIME', hourlyWage: 1400, hiredAt: new Date('2022-03-15'), skills: { barback: true } },
+  { n: 1, name: '高橋 健', nameKana: 'タカハシ ケン', role: 'MANAGER', employmentType: 'FULL_TIME', hourlyWage: 0, monthlySalary: 320_000, hiredAt: new Date('2019-04-01'), accessRole: 'ADMIN', skills: { floor_vip: true, bartender: true }, lineUserId: 'Udev-manager', deduction: { socialInsuranceEnrolled: true, careInsuranceApplicable: true, employmentInsuranceEnrolled: true, dependentsCount: 1, standardMonthlyRemuneration: 320_000 } },
+  { n: 2, name: '佐藤 美咲', nameKana: 'サトウ ミサキ', role: 'FLOOR_VIP', employmentType: 'FULL_TIME', hourlyWage: 0, monthlySalary: 280_000, hiredAt: new Date('2021-07-01'), skills: { reception: true }, deduction: { socialInsuranceEnrolled: true, employmentInsuranceEnrolled: true, standardMonthlyRemuneration: 280_000 } },
+  { n: 3, name: '鈴木 大輔', nameKana: 'スズキ ダイスケ', role: 'BARTENDER', employmentType: 'PART_TIME', hourlyWage: 1400, hiredAt: new Date('2022-03-15'), skills: { barback: true }, deduction: { employmentInsuranceEnrolled: true } },
   { n: 4, name: '田中 玲奈', nameKana: 'タナカ レナ', role: 'BARTENDER', employmentType: 'PART_TIME', hourlyWage: 1350, hiredAt: new Date('2023-09-01') },
   { n: 5, name: '伊藤 翔', nameKana: 'イトウ ショウ', role: 'BARBACK', employmentType: 'PART_TIME', hourlyWage: 1200, hiredAt: daysAgo(42), skills: { bartender: true } },
   { n: 6, name: '渡辺 花', nameKana: 'ワタナベ ハナ', role: 'RECEPTION', employmentType: 'PART_TIME', hourlyWage: 1300, hiredAt: new Date('2023-02-01'), skills: { cloak: true }, lineUserId: 'Udev-staff' },
   { n: 7, name: '山本 悠', nameKana: 'ヤマモト ユウ', role: 'RECEPTION', employmentType: 'PART_TIME', hourlyWage: 1250, isMinor: true, hiredAt: daysAgo(21) },
-  { n: 8, name: '中村 蓮', nameKana: 'ナカムラ レン', role: 'SECURITY', employmentType: 'PART_TIME', hourlyWage: 1500, hiredAt: new Date('2020-10-01') },
+  { n: 8, name: '中村 蓮', nameKana: 'ナカムラ レン', role: 'SECURITY', employmentType: 'PART_TIME', hourlyWage: 1500, hiredAt: new Date('2020-10-01'), deduction: { taxTableType: 'OTSU' } },
   { n: 9, name: '小林 拓真', nameKana: 'コバヤシ タクマ', role: 'SECURITY', employmentType: 'PART_TIME', hourlyWage: 1450, hiredAt: new Date('2022-11-01'), skills: { reception: true } },
   { n: 10, name: '加藤 さくら', nameKana: 'カトウ サクラ', role: 'CLOAK', employmentType: 'PART_TIME', hourlyWage: 1200, hiredAt: new Date('2024-06-01'), skills: { reception: true } },
 ];
 
-const TEMPLATES: Record<'NORMAL' | 'BIG_EVENT' | 'RENTAL', Array<{ roleNeeded: Role; startTime: string; endTime: string; headcount: number }>> = {
+const TEMPLATES: Record<Exclude<EventTypeValue, 'CLOSED'>, Array<{ roleNeeded: Role; startTime: string; endTime: string; headcount: number }>> = {
   NORMAL: [
     { roleNeeded: 'RECEPTION', startTime: '20:00', endTime: '05:00', headcount: 1 },
     { roleNeeded: 'BARTENDER', startTime: '20:00', endTime: '05:00', headcount: 2 },
@@ -72,6 +82,15 @@ const TEMPLATES: Record<'NORMAL' | 'BIG_EVENT' | 'RENTAL', Array<{ roleNeeded: R
     { roleNeeded: 'FLOOR_VIP', startTime: '21:00', endTime: '05:00', headcount: 1 },
     { roleNeeded: 'SECURITY', startTime: '20:00', endTime: '05:00', headcount: 1 },
     { roleNeeded: 'CLOAK', startTime: '21:00', endTime: '04:00', headcount: 1 },
+  ],
+  // 週末営業: 通常より厚め、ビッグイベントほどではない
+  WEEKEND: [
+    { roleNeeded: 'RECEPTION', startTime: '20:00', endTime: '05:00', headcount: 2 },
+    { roleNeeded: 'BARTENDER', startTime: '20:00', endTime: '05:00', headcount: 3 },
+    { roleNeeded: 'BARBACK', startTime: '20:00', endTime: '05:00', headcount: 1 },
+    { roleNeeded: 'FLOOR_VIP', startTime: '21:00', endTime: '05:00', headcount: 2 },
+    { roleNeeded: 'SECURITY', startTime: '20:00', endTime: '05:00', headcount: 2 },
+    { roleNeeded: 'CLOAK', startTime: '20:00', endTime: '05:00', headcount: 1 },
   ],
   BIG_EVENT: [
     { roleNeeded: 'RECEPTION', startTime: '20:00', endTime: '05:00', headcount: 2 },
@@ -129,6 +148,12 @@ async function seedStaff(): Promise<void> {
         hiredAt: s.hiredAt,
         accessRole: s.accessRole ?? 'STAFF',
         lineUserId: s.lineUserId ?? null,
+        taxTableType: s.deduction?.taxTableType ?? 'KOU',
+        dependentsCount: s.deduction?.dependentsCount ?? 0,
+        socialInsuranceEnrolled: s.deduction?.socialInsuranceEnrolled ?? false,
+        careInsuranceApplicable: s.deduction?.careInsuranceApplicable ?? false,
+        employmentInsuranceEnrolled: s.deduction?.employmentInsuranceEnrolled ?? false,
+        standardMonthlyRemuneration: s.deduction?.standardMonthlyRemuneration ?? null,
       },
     });
     if (s.hourlyWage > 0) {
@@ -177,17 +202,15 @@ async function seedBusinessDays(): Promise<string[]> {
   const eventNames = ['TOKYO TRANCE COLLECTIVE', 'ROPPONGI BASS NIGHT', 'NEON SATURDAY', 'MIDNIGHT GROOVE'];
   for (const date of dates) {
     const dow = new Date(`${date}T00:00:00Z`).getUTCDay(); // 0=日
-    let eventType: 'NORMAL' | 'BIG_EVENT' | 'RENTAL' | 'CLOSED' = 'NORMAL';
+    // 既定の曜日ルール(日月休業・金土週末営業)に、土曜の一部をビッグイベント、水曜の一部を貸切として上書き
+    let eventType: EventTypeValue = suggestEventType(date, DEFAULT_SETTINGS);
     let eventName: string | null = null;
-    let expectedCrowd: number | null = 120;
-    if (dow === 1 || dow === 2) {
-      eventType = 'CLOSED';
-      expectedCrowd = null;
-    } else if (dow === 5 || dow === 6) {
+    let expectedCrowd: number | null = eventType === 'CLOSED' ? null : eventType === 'WEEKEND' ? 250 : 120;
+    if (eventType === 'WEEKEND' && dow === 6 && hash(date) < 0.35) {
       eventType = 'BIG_EVENT';
-      eventName = eventNames[Math.floor(hash(date) * eventNames.length)]!;
+      eventName = eventNames[Math.floor(hash(`${date}-name`) * eventNames.length)]!;
       expectedCrowd = 350 + Math.floor(hash(`${date}-crowd`) * 200);
-    } else if (dow === 3 && hash(`${date}-rental`) < 0.2) {
+    } else if (eventType === 'NORMAL' && dow === 3 && hash(`${date}-rental`) < 0.2) {
       eventType = 'RENTAL';
       eventName = '貸切パーティー';
       expectedCrowd = 80;

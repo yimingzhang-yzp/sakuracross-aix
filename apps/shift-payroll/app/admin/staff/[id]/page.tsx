@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation';
 
 import { db } from '@/lib/db';
 import { bd, businessDateLabel, EMPLOYMENT_LABELS, yen } from '@/lib/format';
+import { TAX_TABLE_LABELS, TAX_TABLE_TYPES } from '@/lib/payroll/deductions';
 import { STAFF_ROLE_LABELS, STAFF_ROLES } from '@/lib/scheduling/types';
 
 import { addWageHistoryAction, unlinkLineAction, updateStaffAction } from '../actions';
@@ -88,6 +89,48 @@ export default async function StaffDetailPage({
                 <input type="checkbox" name="isActive" value="1" defaultChecked={staff.isActive} /> 在籍中
               </span>
             </label>
+          </div>
+          <div>
+            <div className="muted small" style={{ marginBottom: 4 }}>
+              法定控除(給与計算)— 社会保険料は標準報酬月額 × 料率 ÷ 2、所得税は甲欄の計算式で自動控除します
+            </div>
+            <div className="grid-3">
+              <label className="field">
+                源泉所得税の区分
+                <select name="taxTableType" defaultValue={staff.taxTableType}>
+                  {TAX_TABLE_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {TAX_TABLE_LABELS[t]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                扶養親族等の数(甲欄の計算に使用)
+                <input name="dependentsCount" type="number" min={0} defaultValue={staff.dependentsCount} />
+              </label>
+              <label className="field">
+                源泉所得税の固定額(円。乙欄 88,000 円以上など税額表を手で見る場合。空欄 = 自動計算)
+                <input name="fixedIncomeTax" type="number" min={0} defaultValue={staff.fixedIncomeTax ?? ''} />
+              </label>
+              <label className="field">
+                標準報酬月額(円。空欄 = 当月総支給から等級表で推定し警告)
+                <input name="standardMonthlyRemuneration" type="number" min={0} step={1000} defaultValue={staff.standardMonthlyRemuneration ?? ''} />
+              </label>
+              <label className="field">
+                <span>
+                  <input type="checkbox" name="socialInsuranceEnrolled" value="1" defaultChecked={staff.socialInsuranceEnrolled} /> 健康保険・厚生年金に加入
+                </span>
+                <span>
+                  <input type="checkbox" name="careInsuranceApplicable" value="1" defaultChecked={staff.careInsuranceApplicable} /> 介護保険の対象(40〜64 歳)
+                </span>
+              </label>
+              <label className="field">
+                <span>
+                  <input type="checkbox" name="employmentInsuranceEnrolled" value="1" defaultChecked={staff.employmentInsuranceEnrolled} /> 雇用保険に加入
+                </span>
+              </label>
+            </div>
           </div>
           <div>
             <div className="muted small" style={{ marginBottom: 4 }}>

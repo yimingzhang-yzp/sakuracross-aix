@@ -56,6 +56,8 @@ enum AccessRole {
 /// 営業日のイベント種別
 enum EventType {
   NORMAL
+  /// 週末営業(金土など。必要人員テンプレートを通常営業と分ける)
+  WEEKEND
   BIG_EVENT
   RENTAL
   CLOSED
@@ -113,31 +115,45 @@ enum LineChannel {
 // -----------------------------------------------------------------------------
 
 model Staff {
-  id             String         @id @default(uuid())
+  id                          String         @id @default(uuid())
   /// LINE 連携後に格納(「CROSS スタッフ」アカウントの userId)
-  lineUserId     String?        @unique
+  lineUserId                  String?        @unique
   /// Supabase Auth のユーザー ID(管理画面ログイン用。スタッフは未設定で可)
-  authUserId     String?        @unique
-  name           String
-  nameKana       String?
+  authUserId                  String?        @unique
+  name                        String
+  nameKana                    String?
   /// 職種
-  role           StaffRole
+  role                        StaffRole
   /// 管理画面の権限
-  accessRole     AccessRole     @default(STAFF)
-  employmentType EmploymentType
+  accessRole                  AccessRole     @default(STAFF)
+  employmentType              EmploymentType
   /// 円。「現在値のキャッシュ」であり、給与計算は必ず WageHistory を参照する
-  hourlyWage     Int
+  hourlyWage                  Int
   /// 社員の月給(円)
-  monthlySalary  Int?
+  monthlySalary               Int?
   /// 18歳未満は 22:00 以降のシフト割当禁止
-  isMinor        Boolean        @default(false)
-  isActive       Boolean        @default(true)
+  isMinor                     Boolean        @default(false)
+  /// 源泉所得税の税額表区分: KOU(甲欄・扶養控除等申告書あり) / OTSU(乙欄) / NONE(源泉徴収しない)
+  taxTableType                String         @default("KOU")
+  /// 源泉控除対象の扶養親族等の数(甲欄の計算に使用)
+  dependentsCount             Int            @default(0)
+  /// 健康保険・厚生年金の被保険者か
+  socialInsuranceEnrolled     Boolean        @default(false)
+  /// 介護保険第2号被保険者(40〜64歳)か。社保加入者のみ意味を持つ
+  careInsuranceApplicable     Boolean        @default(false)
+  /// 雇用保険の被保険者か
+  employmentInsuranceEnrolled Boolean        @default(false)
+  /// 標準報酬月額(円)。未設定なら当月の総支給から等級表で推定し警告を出す
+  standardMonthlyRemuneration Int?
+  /// 源泉所得税の固定額(円)。乙欄 88,000 円以上など税額表を手で参照する場合に設定。null なら自動計算
+  fixedIncomeTax              Int?
+  isActive                    Boolean        @default(true)
   /// {"vip": true, "english": true} 等の柔軟なタグ
-  skills         Json?
+  skills                      Json?
   /// 新人判定(入店3ヶ月未満)に使用
-  hiredAt        DateTime?
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  hiredAt                     DateTime?
+  createdAt                   DateTime       @default(now())
+  updatedAt                   DateTime       @updatedAt
 
   // --- システム1: シフト給与 ---
   wageHistories         WageHistory[]
@@ -482,26 +498,40 @@ model PayrollRun {
 }
 
 model PayrollItem {
-  id               String   @id @default(uuid())
-  payrollRunId     String
-  staffId          String
-  totalMinutes     Int
+  id                          String   @id @default(uuid())
+  payrollRunId                String
+  staffId                     String
+  totalMinutes                Int
   /// 22:00-5:00 の分数
-  nightMinutes     Int
-  basePay          Int
+  nightMinutes                Int
+  basePay                     Int
   /// 深夜割増 25% 分
-  nightPremiumPay  Int
-  incentivePay     Int
+  nightPremiumPay             Int
+  incentivePay                Int
   /// 日払い済み控除
-  advanceDeduction Int
-  grossPay         Int
-  /// 差引支給 = grossPay − advanceDeduction
-  netPay           Int
+  advanceDeduction            Int
+  grossPay                    Int
+  /// 健康保険料(被保険者負担分)
+  healthInsurance             Int      @default(0)
+  /// 介護保険料(被保険者負担分。40〜64歳のみ)
+  careInsurance               Int      @default(0)
+  /// 厚生年金保険料(被保険者負担分)
+  pensionInsurance            Int      @default(0)
+  /// 雇用保険料(被保険者負担分)
+  employmentInsurance         Int      @default(0)
+  /// 源泉所得税
+  incomeTax                   Int      @default(0)
+  /// 計算に使った標準報酬月額(社保加入者のみ)
+  standardMonthlyRemuneration Int?
+  /// 課税対象額 = grossPay − 社会保険料等
+  taxableIncome               Int      @default(0)
+  /// 差引支給 = grossPay − 社会保険料 − 雇用保険料 − 所得税 − advanceDeduction
+  netPay                      Int
   /// 月給者の場合の固定額(時給者は null)
-  monthlySalary    Int?
-  warnings         String[]
+  monthlySalary               Int?
+  warnings                    String[]
   /// 日別内訳(明細表示用)
-  breakdown        Json
+  breakdown                   Json
 
   payrollRun PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
   staff      Staff      @relation(fields: [staffId], references: [id], onDelete: Restrict)
