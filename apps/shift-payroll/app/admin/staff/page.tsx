@@ -4,9 +4,11 @@ import { db, loadSettings } from '@/lib/db';
 import { EMPLOYMENT_LABELS, yen } from '@/lib/format';
 import { TAX_TABLE_LABELS, TAX_TABLE_TYPES } from '@/lib/payroll/deductions';
 import { isNewcomer } from '@/lib/scheduling/generate';
-import { STAFF_ROLE_LABELS, STAFF_ROLES } from '@/lib/scheduling/types';
+import { STAFF_ROLE_LABELS, STAFF_ROLES, type StaffRole } from '@/lib/scheduling/types';
+import { suggestStaffMatch } from '@/lib/staff/match';
 
-import { approveRegistrationAction, createStaffAction, rejectRegistrationAction } from './actions';
+import { createStaffAction, rejectRegistrationAction } from './actions';
+import { RegistrationApprovalForm, type RegistrationCandidate } from './registration-form';
 
 export default async function StaffListPage({ searchParams }: { searchParams: Promise<{ error?: string; ok?: string }> }) {
   const prisma = db();
@@ -17,6 +19,12 @@ export default async function StaffListPage({ searchParams }: { searchParams: Pr
     searchParams,
   ]);
   const now = new Date();
+
+  // 紐付け先の候補は「在籍中かつ LINE 未連携」のスタッフ。氏名が一意に一致すれば既定で選択しておく
+  const candidates: RegistrationCandidate[] = staffList
+    .filter((s) => s.isActive && !s.lineUserId)
+    .map((s) => ({ id: s.id, name: s.name, role: s.role as StaffRole, roleLabel: STAFF_ROLE_LABELS[s.role as StaffRole] }));
+  const candidateSource = staffList.filter((s) => s.isActive && !s.lineUserId).map((s) => ({ id: s.id, name: s.name, nameKana: s.nameKana }));
 
   return (
     <>
@@ -32,57 +40,37 @@ export default async function StaffListPage({ searchParams }: { searchParams: Pr
           <table className="data">
             <thead>
               <tr>
-                <th>申請日時</th>
-                <th>入力された氏名</th>
-                <th>LINE 表示名</th>
-                <th>紐付け先</th>
+                <th>申請内容</th>
+                <th>承認する</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              {registrations.map((r) => (
-                <tr key={r.id}>
-                  <td>{r.createdAt.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}</td>
-                  <td>
-                    {r.nameInput}
-                    {r.nameKanaInput ? <span className="muted small"> ({r.nameKanaInput})</span> : null}
-                  </td>
-                  <td>{r.displayName ?? '—'}</td>
-                  <td>
-                    <form action={approveRegistrationAction} className="inline">
-                      <input type="hidden" name="requestId" value={r.id} />
-                      <select name="staffId" defaultValue="">
-                        <option value="">新規スタッフとして作成</option>
-                        {staffList
-                          .filter((s) => !s.lineUserId)
-                          .map((s) => (
-                            <option key={s.id} value={s.id}>
-                              既存: {s.name}({STAFF_ROLE_LABELS[s.role]})
-                            </option>
-                          ))}
-                      </select>
-                      <select name="role" defaultValue="RECEPTION" title="新規作成時の職種">
-                        {STAFF_ROLES.map((role) => (
-                          <option key={role} value={role}>
-                            {STAFF_ROLE_LABELS[role]}
-                          </option>
-                        ))}
-                      </select>
-                      <button type="submit" className="btn primary sm">
-                        承認
-                      </button>
-                    </form>
-                  </td>
-                  <td>
-                    <form action={rejectRegistrationAction}>
-                      <input type="hidden" name="requestId" value={r.id} />
-                      <button type="submit" className="btn danger sm">
-                        却下
-                      </button>
-                    </form>
-                  </td>
-                </tr>
-              ))}
+              {registrations.map((r) => {
+                const suggested = suggestStaffMatch(r, candidateSource);
+                return (
+                  <tr key={r.id}>
+                    <td style={{ verticalAlign: 'top' }}>
+                      <strong>{r.nameInput}</strong>
+                      {r.nameKanaInput ? <span className="muted small"> ({r.nameKanaInput})</span> : null}
+                      <div className="muted small">LINE 表示名: {r.displayName ?? '—'}</div>
+                      <div className="muted small">{r.createdAt.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}</div>
+                      {suggested ? <span className="badge info">氏名一致で自動選択</span> : null}
+                    </td>
+                    <td style={{ verticalAlign: 'top' }}>
+                      <RegistrationApprovalForm requestId={r.id} nameInput={r.nameInput} candidates={candidates} suggestedStaffId={suggested} />
+                    </td>
+                    <td style={{ verticalAlign: 'top' }}>
+                      <form action={rejectRegistrationAction}>
+                        <input type="hidden" name="requestId" value={r.id} />
+                        <button type="submit" className="btn danger sm">
+                          却下
+                        </button>
+                      </form>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}

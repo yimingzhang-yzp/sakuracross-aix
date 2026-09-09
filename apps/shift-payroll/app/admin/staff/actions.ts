@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { requireAdmin } from '@/lib/auth/session';
 import { audit, db, loadSettings } from '@/lib/db';
 import { TAX_TABLE_TYPES, type TaxTableType } from '@/lib/payroll/deductions';
-import { STAFF_ROLES } from '@/lib/scheduling/types';
+import { STAFF_ROLE_LABELS, STAFF_ROLES, type StaffRole } from '@/lib/scheduling/types';
 
 const roleEnum = z.enum(STAFF_ROLES as [string, ...string[]]);
 const employmentEnum = z.enum(['PART_TIME', 'FULL_TIME', 'CONTRACT']);
@@ -188,52 +188,80 @@ export async function unlinkLineAction(form: FormData): Promise<void> {
   redirect(`/admin/staff/${staffId}?ok=${encodeURIComponent('LINE 連携を解除しました')}`);
 }
 
+/**
+ * LINE 登録申請の承認
+ *
+ * 分岐は 2 通りで、結果がまったく違う:
+ * - `staffId` あり = 既存スタッフに LINE を紐付けるだけ。職種・時給・入店日などの登録内容は一切変更しない
+ *   (画面側も、この場合は職種の選択欄を表示しない)
+ * - `staffId` なし = 申請された氏名で新規スタッフを作成する。このときだけ `role` を使う
+ */
 export async function approveRegistrationAction(form: FormData): Promise<void> {
   const session = await requireAdmin();
   const requestId = str(form, 'requestId');
   const existingStaffId = str(form, 'staffId');
-  const role = str(form, 'role') ?? 'RECEPTION';
   if (!requestId) fail('/admin/staff', '申請 ID がありません');
 
   const prisma = db();
   const request = await prisma.lineRegistrationRequest.findUnique({ where: { id: requestId } });
   if (!request || request.status !== 'PENDING') fail('/admin/staff', '申請が見つからないか、既に処理済みです');
 
+  // 既存に紐付ける場合は、対象が実在し未連携であることを確認する(取り違えの防止)
+  let target: { id: string; name: string; role: string; lineUserId: string | null } | null = null;
+  if (existingStaffId) {
+    target = await prisma.staff.findUnique({ where: { id: existingStaffId }, select: { id: true, name: true, role: true, lineUserId: true } });
+    if (!target) fail('/admin/staff', '紐付け先のスタッフが見つかりません。画面を再読み込みしてやり直してください');
+    if (target.lineUserId) fail('/admin/staff', `${target.name} さんは既に別の LINE アカウントと連携済みです。連携を解除してから承認してください`);
+  }
+
   const settings = await loadSettings();
-  const staffId = await prisma.$transaction(async (tx) => {
-    let id = existingStaffId;
-    if (id) {
-      await tx.staff.update({ where: { id }, data: { lineUserId: request.lineUserId } });
-    } else {
-      const created = await tx.staff.create({
-        data: {
-          name: request.nameInput,
-          nameKana: request.nameKanaInput,
-          role: role as never,
-          employmentType: 'PART_TIME',
-          hourlyWage: settings.defaultHourlyWage,
-          hiredAt: new Date(),
-          lineUserId: request.lineUserId,
-          wageHistories: { create: { hourlyWage: settings.defaultHourlyWage, effectiveFrom: businessDateToDbValue(toBusinessDate(new Date())) } },
-        },
+  const roleForNewStaff = existingStaffId ? null : roleEnum.parse(str(form, 'role') ?? 'RECEPTION');
+
+  const result = await prisma.$transaction(async (tx) => {
+    if (target) {
+      // 紐付けのみ。role は受け取っていても使わない
+      await tx.staff.update({ where: { id: target.id }, data: { lineUserId: request.lineUserId } });
+      await tx.lineRegistrationRequest.update({
+        where: { id: requestId },
+        data: { status: 'APPROVED', staffId: target.id, resolvedBy: session.name, resolvedAt: new Date() },
       });
-      id = created.id;
+      return { staffId: target.id, name: target.name, role: target.role, created: false };
     }
+    const created = await tx.staff.create({
+      data: {
+        name: request.nameInput,
+        nameKana: request.nameKanaInput,
+        role: roleForNewStaff as never,
+        employmentType: 'PART_TIME',
+        hourlyWage: settings.defaultHourlyWage,
+        hiredAt: new Date(),
+        lineUserId: request.lineUserId,
+        wageHistories: { create: { hourlyWage: settings.defaultHourlyWage, effectiveFrom: businessDateToDbValue(toBusinessDate(new Date())) } },
+      },
+    });
     await tx.lineRegistrationRequest.update({
       where: { id: requestId },
-      data: { status: 'APPROVED', staffId: id, resolvedBy: session.name, resolvedAt: new Date() },
+      data: { status: 'APPROVED', staffId: created.id, resolvedBy: session.name, resolvedAt: new Date() },
     });
-    return id;
+    return { staffId: created.id, name: created.name, role: created.role as string, created: true };
   });
 
-  await audit(session, 'registration.approve', 'LineRegistrationRequest', requestId, { staffId });
+  await audit(session, result.created ? 'registration.approve_new' : 'registration.approve_link', 'LineRegistrationRequest', requestId, {
+    staffId: result.staffId,
+    name: result.name,
+    role: result.role,
+  });
   // 本人へ通知(キュー経由)
   const { enqueueLinePush } = await import('@/lib/line/queue');
   await enqueueLinePush(request.lineUserId, [
     { type: 'text', text: '登録が承認されました。リッチメニューから「希望提出」「シフト確認」「打刻」「給与明細」が使えます。' },
   ]);
   revalidatePath('/admin/staff');
-  redirect(`/admin/staff?ok=${encodeURIComponent('登録を承認しました')}`);
+  const roleLabel = STAFF_ROLE_LABELS[result.role as StaffRole] ?? result.role;
+  const message = result.created
+    ? `新規スタッフ「${result.name}」(${roleLabel})を作成し、LINE を連携しました`
+    : `既存スタッフ「${result.name}」(${roleLabel})に LINE を連携しました。登録内容は変更していません`;
+  redirect(`/admin/staff?ok=${encodeURIComponent(message)}`);
 }
 
 export async function rejectRegistrationAction(form: FormData): Promise<void> {

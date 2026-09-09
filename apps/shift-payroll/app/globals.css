@@ -281,6 +281,11 @@ input[type='checkbox'] {
   color: #92400e;
   border: 1px solid #fcd34d;
 }
+.alert.info {
+  background: #e0f2fe;
+  color: #075985;
+  border: 1px solid #7dd3fc;
+}
 
 .toolbar {
   display: flex;
