@@ -41,6 +41,39 @@ export async function recalcAction(form: FormData): Promise<void> {
   redirect(`/admin/payroll/${runId}?ok=${encodeURIComponent('最新の勤怠で再計算しました(新しいドラフト)')}`);
 }
 
+/**
+ * 確定を取り消してドラフトに戻す
+ *
+ * 誤って確定すると、その期間の勤怠・打刻・日払いが恒久的に編集できなくなるため、
+ * 取り消せる経路を用意する。明細の配信履歴(payslipsSentAt)は事実として残す。
+ */
+export async function unfinalizeAction(form: FormData): Promise<void> {
+  const session = await requireAdmin();
+  const id = str(form, 'id');
+  if (!id) redirect('/admin/payroll');
+  const run = await db().payrollRun.findUnique({ where: { id } });
+  if (!run) redirect('/admin/payroll');
+  if (run.status !== 'FINALIZED') {
+    redirect(`/admin/payroll/${id}?error=${encodeURIComponent('この計算は確定済みではありません')}`);
+  }
+  await db().payrollRun.update({ where: { id }, data: { status: 'DRAFT', finalizedAt: null, finalizedBy: null } });
+  await db().auditLog.create({
+    data: {
+      actorId: session.userId,
+      actorName: session.name,
+      action: 'payroll.unfinalize',
+      targetType: 'PayrollRun',
+      targetId: id,
+      detail: { periodStart: dbValueToBusinessDate(run.periodStart), periodEnd: dbValueToBusinessDate(run.periodEnd), previousFinalizedBy: run.finalizedBy },
+    },
+  });
+  revalidatePath('/admin/payroll');
+  revalidatePath('/admin/attendance');
+  redirect(
+    `/admin/payroll/${id}?ok=${encodeURIComponent('確定を取り消しました。この期間の勤怠・打刻・日払いが再び編集できます(スタッフの給与明細からは一時的に見えなくなります)')}`,
+  );
+}
+
 export async function finalizeAction(form: FormData): Promise<void> {
   const session = await requireAdmin();
   const id = str(form, 'id');

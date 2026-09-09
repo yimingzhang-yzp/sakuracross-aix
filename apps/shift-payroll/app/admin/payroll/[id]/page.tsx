@@ -5,7 +5,7 @@ import { db } from '@/lib/db';
 import { bd, businessDateLabel, EMPLOYMENT_LABELS, hhmm, minutesToHours, yen } from '@/lib/format';
 import type { AdvancePaymentInput, DailyBreakdown, IncentiveInput } from '@/lib/payroll/types';
 
-import { finalizeAction, recalcAction } from '../actions';
+import { finalizeAction, recalcAction, unfinalizeAction } from '../actions';
 
 // LINE 配信や一括処理を含むため、既定(15秒)より長い上限を設定する
 export const maxDuration = 60;
@@ -60,12 +60,20 @@ export default async function PayrollRunPage({ params, searchParams }: { params:
             </form>
           </>
         ) : (
-          <form action={recalcAction}>
-            <input type="hidden" name="id" value={id} />
-            <button type="submit" className="btn">
-              再計算(新しいドラフトを作成)
-            </button>
-          </form>
+          <>
+            <form action={recalcAction}>
+              <input type="hidden" name="id" value={id} />
+              <button type="submit" className="btn">
+                再計算(新しいドラフトを作成)
+              </button>
+            </form>
+            <form action={unfinalizeAction}>
+              <input type="hidden" name="id" value={id} />
+              <button type="submit" className="btn danger">
+                確定を取り消す
+              </button>
+            </form>
+          </>
         )}
       </div>
       {query.error ? <div className="alert error">{query.error}</div> : null}
@@ -79,7 +87,8 @@ export default async function PayrollRunPage({ params, searchParams }: { params:
       ) : null}
       {run.status === 'FINALIZED' ? (
         <div className="alert success">
-          この期間の勤怠・日払い・インセンティブは編集できません。修正が必要な場合は「再計算」で新しいドラフトを作成してください(この確定分は履歴として残ります)。
+          この期間の勤怠・日払い・インセンティブは編集できません。金額の修正は「再計算」で新しいドラフトを作成してください(この確定分は履歴として残ります)。
+          打刻や日払いをやり直す必要がある場合は「確定を取り消す」でロックを外せます(スタッフの給与明細からは一時的に見えなくなります)。
           {run.payslipsSentAt ? ` 明細配信: ${run.payslipsSentAt.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}` : ''}
         </div>
       ) : null}
