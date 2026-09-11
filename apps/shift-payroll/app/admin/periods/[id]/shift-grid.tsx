@@ -63,8 +63,17 @@ export function ShiftGrid({ data }: { data: GridData }) {
   const [message, setMessage] = useState<{ type: 'error' | 'success' | 'warn'; text: string } | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  // ドラッグ中のスタッフ。dragover では dataTransfer を読めないため state で保持する
+  const [draggingStaffId, setDraggingStaffId] = useState<string | null>(null);
 
   const prefMap = new Map(data.preferences.map((p) => [`${p.staffId}|${p.businessDate}`, p.availability]));
+  const staffName = new Map(data.staff.map((s) => [s.id, s.name]));
+
+  /** 本人が × を出した営業日は割当禁止(サーバー側でも拒否する) */
+  function isRefused(staffId: string | null, businessDate: string): boolean {
+    if (!staffId) return false;
+    return prefMap.get(`${staffId}|${businessDate}`) === 'NG';
+  }
 
   function run(fn: () => Promise<{ ok: boolean; message?: string; warnings?: string[] }>) {
     startTransition(async () => {
@@ -83,15 +92,26 @@ export function ShiftGrid({ data }: { data: GridData }) {
   function onDragStart(e: DragEvent, payload: DragPayload) {
     e.dataTransfer.setData('application/json', JSON.stringify(payload));
     e.dataTransfer.effectAllowed = 'move';
+    setDraggingStaffId(payload.staffId);
   }
 
-  function onDrop(e: DragEvent, requirementId: string) {
+  function onDragEnd() {
+    setDraggingStaffId(null);
+    setDropTarget(null);
+  }
+
+  function onDrop(e: DragEvent, requirementId: string, businessDate: string) {
     e.preventDefault();
     setDropTarget(null);
+    setDraggingStaffId(null);
     let payload: DragPayload;
     try {
       payload = JSON.parse(e.dataTransfer.getData('application/json')) as DragPayload;
     } catch {
+      return;
+    }
+    if (isRefused(payload.staffId, businessDate)) {
+      setMessage({ type: 'error', text: `${staffName.get(payload.staffId) ?? 'このスタッフ'} は希望が × のため、この日には入れられません` });
       return;
     }
     if (payload.kind === 'assignment') {
@@ -127,7 +147,14 @@ export function ShiftGrid({ data }: { data: GridData }) {
         </div>
         <div className="staff-pool">
           {visibleStaff.map((s) => (
-            <div key={s.id} className="chip" draggable onDragStart={(e) => onDragStart(e, { kind: 'staff', staffId: s.id })} title={s.roleLabel}>
+            <div
+              key={s.id}
+              className="chip"
+              draggable
+              onDragStart={(e) => onDragStart(e, { kind: 'staff', staffId: s.id })}
+              onDragEnd={onDragEnd}
+              title={s.roleLabel}
+            >
               <span className="name">{s.name}</span>
               <span className="muted small">{s.roleLabel}</span>
               {s.isMinor ? <span className="badge danger">未成年</span> : null}
@@ -189,17 +216,25 @@ export function ShiftGrid({ data }: { data: GridData }) {
                         const active = req.assignments.filter((a) => a.status !== 'ABSENT');
                         const missing = req.headcount - active.length;
                         const isTarget = dropTarget === req.id;
+                        // ドラッグ中のスタッフがこの日に × を出していれば、ドロップ自体を受け付けない
+                        const refused = isRefused(draggingStaffId, day.businessDate);
                         return (
                           <div
                             key={req.id}
-                            className={isTarget ? 'drop-target' : undefined}
+                            className={refused ? 'no-drop' : isTarget ? 'drop-target' : undefined}
                             onDragOver={(e) => {
+                              if (refused) {
+                                // preventDefault を呼ばない = ドロップ不可。カーソルも禁止表示になる
+                                e.dataTransfer.dropEffect = 'none';
+                                return;
+                              }
                               e.preventDefault();
                               setDropTarget(req.id);
                             }}
                             onDragLeave={() => setDropTarget(null)}
-                            onDrop={(e) => onDrop(e, req.id)}
+                            onDrop={(e) => onDrop(e, req.id, day.businessDate)}
                             style={{ minHeight: 40, padding: 2 }}
+                            title={refused ? '本人の希望が × のため割り当てできません' : undefined}
                           >
                             <div className="cell-meta">
                               {fmtTime(req.start)}-{fmtTime(req.end)} {active.length}/{req.headcount}
@@ -213,6 +248,7 @@ export function ShiftGrid({ data }: { data: GridData }) {
                                   className={`chip ${a.status === 'ABSENT' ? 'absent' : ''} ${a.source === 'MANUAL' ? 'manual' : ''}`}
                                   draggable={a.status !== 'ABSENT'}
                                   onDragStart={(e) => onDragStart(e, { kind: 'assignment', assignmentId: a.id, staffId: a.staffId })}
+                                  onDragEnd={onDragEnd}
                                   title={`${a.status} / ${a.source}${pref ? ` / 希望:${pref}` : ' / 希望未提出'}`}
                                 >
                                   <span className="name">{a.staffName}</span>
@@ -262,6 +298,7 @@ export function ShiftGrid({ data }: { data: GridData }) {
       </div>
       <p className="muted small" style={{ marginTop: 8 }}>
         青 = 自動生成 / 黄 = 手修正 / 「確」= 確定済み / 赤帯 = 欠勤。チップをドラッグして別のセルへ移動、× で外す。
+        本人が希望を <strong>×</strong> にした営業日にはドロップできません(枠が赤い斜線になります)。
       </p>
     </div>
   );

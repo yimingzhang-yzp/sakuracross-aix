@@ -36,6 +36,8 @@ export default function PreferencePage() {
   const [draft, setDraft] = useState<Record<string, Availability>>({});
   const [message, setMessage] = useState<{ type: 'success' | 'error' | 'warn'; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  // 送信が終わったら入力画面ではなく完了画面を出す(二重送信と「送れたか分からない」を防ぐ)
+  const [done, setDone] = useState<{ saved: number; late: boolean; counts: Record<Availability, number> } | null>(null);
 
   const load = useCallback(async () => {
     const res = await apiFetch('/api/liff/preferences');
@@ -71,10 +73,21 @@ export default function PreferencePage() {
         setMessage({ type: 'error', text: json.error ?? '保存に失敗しました' });
         return;
       }
-      setMessage(json.late ? { type: 'warn', text: `${json.saved} 日分を保存しました(締切を過ぎているため反映は店長の判断になります)` } : { type: 'success', text: `${json.saved} 日分を保存しました` });
+      const counts = { OK: 0, NG: 0, EARLY_ONLY: 0, LATE_ONLY: 0 } as Record<Availability, number>;
+      for (const v of Object.values(draft)) counts[v] += 1;
+      setMessage(null);
+      setDone({ saved: json.saved ?? 0, late: Boolean(json.late), counts });
       await load();
     } finally {
       setBusy(false);
+    }
+  }
+
+  function closeWindow() {
+    try {
+      window.liff?.closeWindow();
+    } catch {
+      /* ブラウザで開いている場合は閉じられない */
     }
   }
 
@@ -89,7 +102,54 @@ export default function PreferencePage() {
     <>
       <h1>希望シフト提出</h1>
       <LiffGate>
-        {!periods ? (
+        {done ? (
+          <div className="card" style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 44, lineHeight: 1 }} aria-hidden="true">
+              ✅
+            </div>
+            <h2 style={{ margin: '10px 0 4px' }}>希望を送信しました</h2>
+            <p className="muted small" style={{ marginTop: 0 }}>
+              {period ? `${label(period.start)}〜${label(period.end)}` : ''} の {done.saved} 日分
+            </p>
+            <table className="data" style={{ marginTop: 12, textAlign: 'left' }}>
+              <tbody>
+                <tr>
+                  <th>○ 入れる</th>
+                  <td className="num">{done.counts.OK} 日</td>
+                </tr>
+                <tr>
+                  <th>× 入れない</th>
+                  <td className="num">{done.counts.NG} 日</td>
+                </tr>
+                <tr>
+                  <th>早 早番のみ</th>
+                  <td className="num">{done.counts.EARLY_ONLY} 日</td>
+                </tr>
+                <tr>
+                  <th>遅 遅番のみ</th>
+                  <td className="num">{done.counts.LATE_ONLY} 日</td>
+                </tr>
+              </tbody>
+            </table>
+            {done.late ? (
+              <div className="alert warn" style={{ marginTop: 12 }}>
+                締切を過ぎているため、反映は店長の判断になります。
+              </div>
+            ) : (
+              <p className="muted small" style={{ marginTop: 12 }}>
+                シフトが決まったら LINE でお知らせします。締切までは何度でも修正できます。
+              </p>
+            )}
+            <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
+              <button type="button" className="big-btn in" onClick={closeWindow}>
+                閉じる
+              </button>
+              <button type="button" className="btn" onClick={() => setDone(null)}>
+                内容を修正する
+              </button>
+            </div>
+          </div>
+        ) : !periods ? (
           <p className="muted">読み込み中…</p>
         ) : periods.length === 0 ? (
           <div className="alert warn">現在、希望を受け付けている期間はありません。</div>

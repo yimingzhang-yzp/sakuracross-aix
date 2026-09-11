@@ -11,6 +11,7 @@ import { enqueueLinePush } from '../line/queue';
 import { generateShifts, overlapsMinorNight, staffCanWorkRole, weekStartOf } from '../scheduling/generate';
 import { assignmentSignature } from '../scheduling/templates';
 import type { SchedAssignment, StaffRole } from '../scheduling/types';
+import { isMinorNow } from '../staff/minor';
 
 export async function periodRange(periodId: string): Promise<{ id: string; start: string; end: string; status: string }> {
   const period = await getPrisma().shiftPeriod.findUniqueOrThrow({ where: { id: periodId } });
@@ -76,7 +77,8 @@ export async function runGeneration(periodId: string, actor: string): Promise<{ 
       role: s.role as StaffRole,
       skills: (s.skills as Record<string, unknown> | null) ?? null,
       employmentType: s.employmentType,
-      isMinor: s.isMinor,
+      // 生年月日から都度判定する(誕生日をまたいでも DB 更新なしで正しくなる)
+      isMinor: isMinorNow(s),
       hiredAt: s.hiredAt,
       isActive: s.isActive,
     })),
@@ -130,7 +132,7 @@ export async function checkPlacement(staffId: string, requirementId: string, ign
   const warnings: string[] = [];
 
   if (!staff.isActive) errors.push(`${staff.name} は在籍外です`);
-  if (staff.isMinor && overlapsMinorNight({ businessDate, start: requirement.startTime, end: requirement.endTime }, settings)) {
+  if (isMinorNow(staff) && overlapsMinorNight({ businessDate, start: requirement.startTime, end: requirement.endTime }, settings)) {
     errors.push(`${staff.name} は 18 歳未満のため ${settings.minorNightStart} 以降のシフトに入れません`);
   }
   const sameDay = await prisma.shiftAssignment.findFirst({
@@ -141,7 +143,8 @@ export async function checkPlacement(staffId: string, requirementId: string, ign
   if (!staffCanWorkRole(staff as never, requirement.roleNeeded as StaffRole)) warnings.push(`${staff.name} の職種と異なります(兼務スキル未登録)`);
   const pref = await prisma.shiftPreference.findUnique({ where: { staffId_businessDate: { staffId, businessDate: requirement.businessDay.businessDate } } });
   if (!pref) warnings.push('希望が未提出です');
-  else if (pref.availability === 'NG') warnings.push('希望は × です');
+  // 本人が × を出した日への割当は禁止する(手修正のドラッグ&ドロップでも入れられない)
+  else if (pref.availability === 'NG') errors.push(`${staff.name} は ${businessDateLabel(businessDate)} の希望が × のため割り当てられません`);
 
   if (settings.weeklyHoursCap > 0) {
     const weekStart = weekStartOf(businessDate, settings.weekStartsOn);

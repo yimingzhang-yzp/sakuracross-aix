@@ -76,7 +76,10 @@ export default async function AttendancePage({
 
       <div className="card">
         <h2>打刻一覧</h2>
-        <p className="muted small">予定と 15 分以上ずれている打刻は黄色で表示。承認済みの打刻だけが給与計算の対象になります。休憩 0 分は自動控除ルールが適用されます({settings.autoBreakEnabled ? '有効' : '無効'})。</p>
+        <p className="muted small">
+          予定と 15 分以上ずれている打刻は黄色で表示。承認済みの打刻だけが給与計算の対象になります。休憩 0 分は自動控除ルールが適用されます(
+          {settings.autoBreakEnabled ? '有効' : '無効'})。<strong>翌朝の退勤時刻は 10:00 より前の時刻としてそのまま入力してください</strong>(例 04:00)。
+        </p>
         <table className="data">
           <thead>
             <tr>
@@ -105,6 +108,8 @@ export default async function AttendancePage({
                 const devOut = rec?.clockOut && asg ? Math.abs(rec.clockOut.getTime() - asg.plannedEnd.getTime()) / 60000 : 0;
                 const worked = rec?.clockIn && rec.clockOut ? Math.max(0, Math.floor((rec.clockOut.getTime() - rec.clockIn.getTime()) / 60000) - rec.breakMinutes) : null;
                 const highlight = devIn >= 15 || devOut >= 15;
+                // 出勤・退勤・休憩の入力欄を別セルに置きつつ 1 つのフォームとして送るための id
+                const formId = `tr-${s.id}`;
                 return (
                   <tr key={s.id} style={highlight ? { background: 'var(--warn-bg)' } : undefined}>
                     <td>
@@ -121,18 +126,16 @@ export default async function AttendancePage({
                         <span className="muted">予定なし</span>
                       )}
                     </td>
-                    <td colSpan={3}>
-                      <form action={upsertTimeRecordAction} className="inline">
-                        <input type="hidden" name="staffId" value={s.id} />
-                        <input type="hidden" name="date" value={date} />
-                        <input type="time" name="clockIn" defaultValue={rec?.clockIn ? hhmm(rec.clockIn) : ''} disabled={Boolean(lockingRun)} />
-                        <input type="time" name="clockOut" defaultValue={rec?.clockOut ? hhmm(rec.clockOut) : ''} disabled={Boolean(lockingRun)} />
-                        <input type="number" name="breakMinutes" min={0} defaultValue={rec?.breakMinutes ?? 0} style={{ width: 70 }} disabled={Boolean(lockingRun)} />
-                        <button type="submit" className="btn sm" disabled={Boolean(lockingRun)}>
-                          保存
-                        </button>
-                      </form>
-                      <div className="muted small">出勤 / 退勤(翌日の時刻は 10:00 より前として入力)/ 休憩</div>
+                    {/* 入力欄はヘッダ(出勤 / 退勤 / 休憩)と 1 セルずつ対応させる。
+                        1 つの <form> で 3 セルをまたげないため、form 属性でフォームの所有者を指定している */}
+                    <td>
+                      <input type="time" name="clockIn" form={formId} defaultValue={rec?.clockIn ? hhmm(rec.clockIn) : ''} disabled={Boolean(lockingRun)} style={{ width: '100%' }} />
+                    </td>
+                    <td>
+                      <input type="time" name="clockOut" form={formId} defaultValue={rec?.clockOut ? hhmm(rec.clockOut) : ''} disabled={Boolean(lockingRun)} style={{ width: '100%' }} />
+                    </td>
+                    <td className="num">
+                      <input type="number" name="breakMinutes" form={formId} min={0} defaultValue={rec?.breakMinutes ?? 0} disabled={Boolean(lockingRun)} style={{ width: 72 }} />
                     </td>
                     <td className="num">{worked !== null ? minutesToHours(worked) : '—'}</td>
                     <td>
@@ -148,15 +151,24 @@ export default async function AttendancePage({
                       {rec?.editedByAdmin ? <div className="muted small">管理者修正</div> : null}
                     </td>
                     <td>
-                      {rec && !rec.approved ? (
-                        <form action={approveTimeRecordAction}>
-                          <input type="hidden" name="id" value={rec.id} />
+                      <div className="inline">
+                        <form action={upsertTimeRecordAction} id={formId}>
+                          <input type="hidden" name="staffId" value={s.id} />
                           <input type="hidden" name="date" value={date} />
-                          <button type="submit" className="btn primary sm" disabled={Boolean(lockingRun)}>
-                            承認
+                          <button type="submit" className="btn sm" disabled={Boolean(lockingRun)}>
+                            保存
                           </button>
                         </form>
-                      ) : null}
+                        {rec && !rec.approved ? (
+                          <form action={approveTimeRecordAction}>
+                            <input type="hidden" name="id" value={rec.id} />
+                            <input type="hidden" name="date" value={date} />
+                            <button type="submit" className="btn primary sm" disabled={Boolean(lockingRun)}>
+                              承認
+                            </button>
+                          </form>
+                        ) : null}
+                      </div>
                     </td>
                   </tr>
                 );

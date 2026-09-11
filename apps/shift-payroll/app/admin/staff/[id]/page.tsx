@@ -4,6 +4,7 @@ import { db } from '@/lib/db';
 import { bd, businessDateLabel, EMPLOYMENT_LABELS, yen } from '@/lib/format';
 import { TAX_TABLE_LABELS, TAX_TABLE_TYPES } from '@/lib/payroll/deductions';
 import { STAFF_ROLE_LABELS, STAFF_ROLES } from '@/lib/scheduling/types';
+import { ageOf, isMinorNow, todayInTokyo } from '@/lib/staff/minor';
 
 import { addWageHistoryAction, unlinkLineAction, updateStaffAction } from '../actions';
 
@@ -22,11 +23,20 @@ export default async function StaffDetailPage({
   });
   if (!staff) notFound();
   const skills = (staff.skills as Record<string, unknown> | null) ?? {};
+  // 「対応できる職種」= 採用職種 + 兼務スキル。画面ではこのひとまとめをチェックボックスで編集する
+  const workableRoles = new Set<string>([staff.role, ...STAFF_ROLES.filter((r) => skills[r.toLowerCase()] === true)]);
+  const now = new Date();
+  const age = ageOf(staff.birthDate, now);
+  const minor = isMinorNow(staff, now);
 
   return (
     <>
       <h1>
-        {staff.name} <span className="muted small">{EMPLOYMENT_LABELS[staff.employmentType]} / {STAFF_ROLE_LABELS[staff.role]}</span>
+        {staff.name}{' '}
+        <span className="muted small">
+          {EMPLOYMENT_LABELS[staff.employmentType]} / 採用職種 {STAFF_ROLE_LABELS[staff.role]}
+        </span>{' '}
+        {minor ? <span className="badge danger">未成年{age !== null ? ` ${age}歳` : ''}</span> : age !== null ? <span className="badge">{age}歳</span> : null}
       </h1>
       {query.error ? <div className="alert error">{query.error}</div> : null}
       {query.ok ? <div className="alert success">{query.ok}</div> : null}
@@ -45,22 +55,19 @@ export default async function StaffDetailPage({
               <input name="nameKana" defaultValue={staff.nameKana ?? ''} />
             </label>
             <label className="field">
-              職種 *
-              <select name="role" defaultValue={staff.role}>
-                {STAFF_ROLES.map((role) => (
-                  <option key={role} value={role}>
-                    {STAFF_ROLE_LABELS[role]}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
               雇用形態 *
               <select name="employmentType" defaultValue={staff.employmentType}>
                 <option value="PART_TIME">アルバイト</option>
                 <option value="FULL_TIME">社員</option>
                 <option value="CONTRACT">契約</option>
               </select>
+            </label>
+            <label className="field">
+              生年月日
+              <input name="birthDate" type="date" defaultValue={staff.birthDate ? bd(staff.birthDate) : ''} max={todayInTokyo()} />
+              <span className="muted small">
+                {age !== null ? `満 ${age} 歳${minor ? ' / 22 時以降のシフトに入れません' : ''}` : '未登録。入力すると未成年かどうかを自動判定します'}
+              </span>
             </label>
             <label className="field">
               月給(円、社員のみ。空欄なら時給計算)
@@ -82,9 +89,6 @@ export default async function StaffDetailPage({
               <input name="authUserId" defaultValue={staff.authUserId ?? ''} placeholder="Authentication > Users の UUID" />
             </label>
             <label className="field">
-              <span>
-                <input type="checkbox" name="isMinor" value="1" defaultChecked={staff.isMinor} /> 18 歳未満
-              </span>
               <span>
                 <input type="checkbox" name="isActive" value="1" defaultChecked={staff.isActive} /> 在籍中
               </span>
@@ -134,13 +138,13 @@ export default async function StaffDetailPage({
           </div>
           <div>
             <div className="muted small" style={{ marginBottom: 4 }}>
-              兼務できる職種(シフト生成の候補に含める)
+              対応できる職種(1 つ以上)— シフト生成と手修正の候補になります。先頭に選んだ職種が採用職種として扱われます
             </div>
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-              {STAFF_ROLES.filter((r) => r !== staff.role).map((role) => (
+              {STAFF_ROLES.map((role) => (
                 <label key={role} style={{ fontSize: 13 }}>
-                  <input type="checkbox" name="skills" value={role.toLowerCase()} defaultChecked={skills[role.toLowerCase()] === true} />{' '}
-                  {STAFF_ROLE_LABELS[role]}
+                  <input type="checkbox" name="roles" value={role} defaultChecked={workableRoles.has(role)} /> {STAFF_ROLE_LABELS[role]}
+                  {role === staff.role ? <span className="badge info" style={{ marginLeft: 4 }}>採用</span> : null}
                 </label>
               ))}
             </div>

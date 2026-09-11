@@ -131,7 +131,10 @@ model Staff {
   hourlyWage                  Int
   /// 社員の月給(円)
   monthlySalary               Int?
-  /// 18歳未満は 22:00 以降のシフト割当禁止
+  /// 生年月日。未成年(18歳未満)かどうかはこの値から判定する
+  birthDate                   DateTime?      @db.Date
+  /// 18歳未満は 22:00 以降のシフト割当禁止。birthDate からの導出結果のキャッシュで、
+  /// 判定は常に birthDate から再計算する(誕生日で自動的に切り替わるようにするため)
   isMinor                     Boolean        @default(false)
   /// 源泉所得税の税額表区分: KOU(甲欄・扶養控除等申告書あり) / OTSU(乙欄) / NONE(源泉徴収しない)
   taxTableType                String         @default("KOU")

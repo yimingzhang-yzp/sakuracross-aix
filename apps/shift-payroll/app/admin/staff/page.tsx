@@ -6,6 +6,7 @@ import { TAX_TABLE_LABELS, TAX_TABLE_TYPES } from '@/lib/payroll/deductions';
 import { isNewcomer } from '@/lib/scheduling/generate';
 import { STAFF_ROLE_LABELS, STAFF_ROLES, type StaffRole } from '@/lib/scheduling/types';
 import { suggestStaffMatch } from '@/lib/staff/match';
+import { ageOf, isMinorNow, todayInTokyo } from '@/lib/staff/minor';
 
 import { createStaffAction, rejectRegistrationAction } from './actions';
 import { RegistrationApprovalForm, type RegistrationCandidate } from './registration-form';
@@ -107,7 +108,7 @@ export default async function StaffListPage({ searchParams }: { searchParams: Pr
                 <td>{EMPLOYMENT_LABELS[s.employmentType]}</td>
                 <td className="num">{s.monthlySalary ? `${yen(s.monthlySalary)}/月` : yen(s.hourlyWage)}</td>
                 <td>
-                  {s.isMinor ? <span className="badge danger">未成年</span> : null}{' '}
+                  {isMinorNow(s, now) ? <span className="badge danger">未成年{ageOf(s.birthDate, now) !== null ? ` ${ageOf(s.birthDate, now)}歳` : ''}</span> : null}{' '}
                   {isNewcomer(s, now, settings.newcomerMonths) ? <span className="badge warn">新人</span> : null}{' '}
                   {s.accessRole === 'ADMIN' ? <span className="badge info">管理者</span> : null}{' '}
                   {!s.isActive ? <span className="badge">退職/停止</span> : null}
@@ -138,8 +139,11 @@ export default async function StaffListPage({ searchParams }: { searchParams: Pr
               <input name="nameKana" />
             </label>
             <label className="field">
-              職種 *
-              <select name="role" defaultValue="RECEPTION">
+              採用職種 *
+              <select name="role" defaultValue="" required>
+                <option value="" disabled>
+                  選択してください
+                </option>
                 {STAFF_ROLES.map((role) => (
                   <option key={role} value={role}>
                     {STAFF_ROLE_LABELS[role]}
@@ -164,13 +168,13 @@ export default async function StaffListPage({ searchParams }: { searchParams: Pr
               <input name="monthlySalary" type="number" min={0} />
             </label>
             <label className="field">
-              入店日
-              <input name="hiredAt" type="date" />
+              生年月日 *
+              <input name="birthDate" type="date" required max={todayInTokyo()} />
+              <span className="muted small">18 歳未満かどうかは、この生年月日から自動で判定します(22 時以降のシフト不可)</span>
             </label>
             <label className="field">
-              <span>
-                <input type="checkbox" name="isMinor" value="1" /> 18 歳未満(22 時以降のシフト不可)
-              </span>
+              入店日
+              <input name="hiredAt" type="date" />
             </label>
           </div>
           <div className="muted small" style={{ marginTop: 4 }}>

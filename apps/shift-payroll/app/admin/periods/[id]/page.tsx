@@ -6,6 +6,7 @@ import { db, loadSettings } from '@/lib/db';
 import { AVAILABILITY_LABELS, bd, businessDateLabel } from '@/lib/format';
 import { isNewcomer } from '@/lib/scheduling/generate';
 import { STAFF_ROLE_LABELS, type StaffRole } from '@/lib/scheduling/types';
+import { isMinorNow } from '@/lib/staff/minor';
 
 import { PeriodStatus } from '../../period-status';
 import { confirmPeriodAction, generateAction } from '../actions';
@@ -87,7 +88,7 @@ export default async function PeriodDetailPage({
       name: s.name,
       role: s.role,
       roleLabel: STAFF_ROLE_LABELS[s.role as StaffRole],
-      isMinor: s.isMinor,
+      isMinor: isMinorNow(s, now),
       isNewcomer: isNewcomer(s, now, settings.newcomerMonths),
       employmentType: s.employmentType,
     })),

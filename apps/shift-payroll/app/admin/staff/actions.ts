@@ -9,6 +9,21 @@ import { requireAdmin } from '@/lib/auth/session';
 import { audit, db, loadSettings } from '@/lib/db';
 import { TAX_TABLE_TYPES, type TaxTableType } from '@/lib/payroll/deductions';
 import { STAFF_ROLE_LABELS, STAFF_ROLES, type StaffRole } from '@/lib/scheduling/types';
+import { isMinorNow, validateBirthDate } from '@/lib/staff/minor';
+
+/** バリデーションエラーを日本語の項目名で返すための対応表 */
+const LABELS: Record<string, string> = {
+  name: '氏名',
+  nameKana: 'フリガナ',
+  role: '採用職種',
+  employmentType: '雇用形態',
+  hourlyWage: '時給',
+  monthlySalary: '月給',
+  hiredAt: '入店日',
+  birthDate: '生年月日',
+  accessRole: '管理画面の権限',
+  authUserId: 'Supabase Auth ユーザー ID',
+};
 
 const roleEnum = z.enum(STAFF_ROLES as [string, ...string[]]);
 const employmentEnum = z.enum(['PART_TIME', 'FULL_TIME', 'CONTRACT']);
@@ -50,10 +65,18 @@ function fail(path: string, message: string): never {
   redirect(`${path}?error=${encodeURIComponent(message)}`);
 }
 
-function skillsFromForm(form: FormData): Record<string, boolean> | undefined {
-  const values = form.getAll('skills').filter((v): v is string => typeof v === 'string');
-  if (values.length === 0) return undefined;
-  return Object.fromEntries(values.map((v) => [v, true]));
+/**
+ * 「対応できる職種」チェックボックス(name="roles")から、採用職種(role)と兼務スキル(skills)を決める。
+ * 現在の採用職種がチェックされていればそれを維持し、外されていれば先頭のチェックを採用職種に繰り上げる。
+ */
+function rolesFromForm(form: FormData, currentRole: string): { role: StaffRole; skills: Record<string, boolean> } | null {
+  const picked = form.getAll('roles').filter((v): v is string => typeof v === 'string');
+  const valid = STAFF_ROLES.filter((r) => picked.includes(r));
+  if (valid.length === 0) return null;
+  const kept = valid.find((r) => r === currentRole);
+  const role = kept ?? valid[0]!;
+  const skills = Object.fromEntries(valid.filter((r) => r !== role).map((r) => [r.toLowerCase(), true]));
+  return { role, skills };
 }
 
 export async function createStaffAction(form: FormData): Promise<void> {
@@ -68,7 +91,7 @@ export async function createStaffAction(form: FormData): Promise<void> {
       hourlyWage: z.coerce.number().int().min(0).default(settings.defaultHourlyWage),
       monthlySalary: z.coerce.number().int().min(0).optional(),
       hiredAt: z.string().optional(),
-      isMinor: z.boolean(),
+      birthDate: z.string().min(1, '生年月日は必須です'),
     })
     .safeParse({
       name: str(form, 'name'),
@@ -78,13 +101,18 @@ export async function createStaffAction(form: FormData): Promise<void> {
       hourlyWage: str(form, 'hourlyWage'),
       monthlySalary: str(form, 'monthlySalary'),
       hiredAt: str(form, 'hiredAt'),
-      isMinor: form.get('isMinor') === '1',
+      birthDate: str(form, 'birthDate'),
     });
-  if (!parsed.success) fail('/admin/staff', '入力内容を確認してください: ' + parsed.error.issues.map((i) => i.path.join('.')).join(', '));
+  if (!parsed.success) {
+    const missing = parsed.error.issues.map((i) => LABELS[String(i.path[0])] ?? String(i.path[0])).join('・');
+    fail('/admin/staff', `入力内容を確認してください: ${missing}`);
+  }
   const deduction = deductionFieldsFromForm(form);
   if (!deduction) fail('/admin/staff', '法定控除の入力(扶養人数など)を確認してください');
 
   const data = parsed.data;
+  const birthError = validateBirthDate(data.birthDate);
+  if (birthError) fail('/admin/staff', birthError);
   const staff = await db().staff.create({
     data: {
       name: data.name,
@@ -94,7 +122,9 @@ export async function createStaffAction(form: FormData): Promise<void> {
       hourlyWage: data.hourlyWage,
       monthlySalary: data.monthlySalary ?? null,
       hiredAt: data.hiredAt ? new Date(`${data.hiredAt}T00:00:00Z`) : null,
-      isMinor: data.isMinor,
+      birthDate: businessDateToDbValue(data.birthDate),
+      // 未成年フラグは生年月日からの導出値(判定は読み出し時にも再計算する)
+      isMinor: isMinorNow({ birthDate: businessDateToDbValue(data.birthDate) }),
       ...deduction,
       wageHistories:
         data.hourlyWage > 0
@@ -115,47 +145,68 @@ export async function updateStaffAction(form: FormData): Promise<void> {
     .object({
       name: z.string().min(1),
       nameKana: z.string().optional(),
-      role: roleEnum,
       employmentType: employmentEnum,
       monthlySalary: z.coerce.number().int().min(0).optional(),
       hiredAt: z.string().optional(),
+      birthDate: z.string().optional(),
       accessRole: z.enum(['ADMIN', 'STAFF']),
       authUserId: z.string().optional(),
     })
     .safeParse({
       name: str(form, 'name'),
       nameKana: str(form, 'nameKana'),
-      role: str(form, 'role'),
       employmentType: str(form, 'employmentType'),
       monthlySalary: str(form, 'monthlySalary'),
       hiredAt: str(form, 'hiredAt'),
+      birthDate: str(form, 'birthDate'),
       accessRole: str(form, 'accessRole'),
       authUserId: str(form, 'authUserId'),
     });
-  if (!parsed.success) fail(`/admin/staff/${id}`, '入力内容を確認してください');
+  if (!parsed.success) {
+    const missing = parsed.error.issues.map((i) => LABELS[String(i.path[0])] ?? String(i.path[0])).join('・');
+    fail(`/admin/staff/${id}`, `入力内容を確認してください: ${missing}`);
+  }
   const deduction = deductionFieldsFromForm(form);
   if (!deduction) fail(`/admin/staff/${id}`, '法定控除の入力(扶養人数・標準報酬月額・固定税額)を確認してください');
   const d = parsed.data;
+  if (d.birthDate) {
+    const birthError = validateBirthDate(d.birthDate);
+    if (birthError) fail(`/admin/staff/${id}`, birthError);
+  }
+
+  const current = await db().staff.findUnique({ where: { id }, select: { role: true } });
+  if (!current) fail('/admin/staff', 'スタッフが見つかりません');
+  const roles = rolesFromForm(form, current.role);
+  if (!roles) fail(`/admin/staff/${id}`, '対応できる職種を 1 つ以上選んでください');
+
+  const birthDate = d.birthDate ? businessDateToDbValue(d.birthDate) : null;
   await db().staff.update({
     where: { id },
     data: {
       name: d.name,
       nameKana: d.nameKana ?? null,
-      role: d.role as never,
+      role: roles.role as never,
       employmentType: d.employmentType,
       monthlySalary: d.monthlySalary ?? null,
       hiredAt: d.hiredAt ? new Date(`${d.hiredAt}T00:00:00Z`) : null,
+      birthDate,
       accessRole: d.accessRole,
       authUserId: d.authUserId ?? null,
-      isMinor: form.get('isMinor') === '1',
+      // 未成年フラグは生年月日からの導出値。未入力なら false に戻す
+      isMinor: birthDate ? isMinorNow({ birthDate }) : false,
       isActive: form.get('isActive') === '1',
-      skills: skillsFromForm(form) ?? {},
+      skills: roles.skills,
       ...deduction,
     },
   });
-  await audit(session, 'staff.update', 'Staff', id, { name: d.name });
+  await audit(session, 'staff.update', 'Staff', id, { name: d.name, role: roles.role, skills: Object.keys(roles.skills), birthDate: d.birthDate ?? null });
   revalidatePath('/admin/staff');
-  redirect(`/admin/staff/${id}?ok=${encodeURIComponent('保存しました')}`);
+  const roleChanged = roles.role !== current.role;
+  redirect(
+    `/admin/staff/${id}?ok=${encodeURIComponent(
+      roleChanged ? `保存しました(採用職種を ${STAFF_ROLE_LABELS[roles.role as StaffRole]} に変更しました)` : '保存しました',
+    )}`,
+  );
 }
 
 export async function addWageHistoryAction(form: FormData): Promise<void> {

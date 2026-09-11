@@ -36,6 +36,12 @@ function monthsAgo(months: number, day = 1): Date {
 function daysAgo(days: number): Date {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 }
+/** n 年前の今日(YYYY-MM-DD)。生年月日の生成に使う */
+function yearsAgo(years: number): string {
+  const now = new Date();
+  const d = new Date(Date.UTC(now.getUTCFullYear() - years, now.getUTCMonth(), now.getUTCDate()));
+  return d.toISOString().slice(0, 10);
+}
 
 type Role = 'RECEPTION' | 'BARTENDER' | 'BARBACK' | 'FLOOR_VIP' | 'CLOAK' | 'SECURITY' | 'MANAGER';
 
@@ -47,6 +53,7 @@ const STAFF: Array<{
   employmentType: 'PART_TIME' | 'FULL_TIME' | 'CONTRACT';
   hourlyWage: number;
   monthlySalary?: number;
+  /** 未成年(18歳未満)にしたい場合は true。生年月日は 17 歳になるよう自動で入れる */
   isMinor?: boolean;
   skills?: Record<string, boolean>;
   hiredAt: Date;
@@ -143,6 +150,8 @@ async function seedStaff(): Promise<void> {
         employmentType: s.employmentType,
         hourlyWage: s.hourlyWage,
         monthlySalary: s.monthlySalary ?? null,
+        // 未成年判定は生年月日から行うため、両方を整合させて入れる
+        birthDate: businessDateToDbValue(yearsAgo(s.isMinor ? 17 : 24 + (s.n % 9))),
         isMinor: s.isMinor ?? false,
         skills: s.skills ?? undefined,
         hiredAt: s.hiredAt,

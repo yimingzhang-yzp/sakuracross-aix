@@ -14,6 +14,7 @@ import {
 } from '../line/messages';
 import { overlapsMinorNight, staffCanWorkRole } from '../scheduling/generate';
 import type { StaffRole } from '../scheduling/types';
+import { isMinorNow } from '../staff/minor';
 import { type ApplyOutcome, applyToOpenShift } from './apply';
 import { createPrismaOpenShiftRepository } from './prisma-repo';
 
@@ -49,7 +50,7 @@ export async function issueOpenShift(input: IssueOpenShiftInput): Promise<{ id: 
       staffCanWorkRole(s as never, input.role) &&
       !busy.has(s.id) &&
       !ng.has(s.id) &&
-      !(s.isMinor && overlapsMinorNight({ businessDate, start: input.start, end: input.end }, settings)) &&
+      !(isMinorNow(s) && overlapsMinorNight({ businessDate, start: input.start, end: input.end }, settings)) &&
       s.lineUserId,
   );
 
@@ -110,7 +111,7 @@ export async function handleOpenShiftApplication(
     if (conflict) return { outcome: 'INELIGIBLE', replyText: 'その営業日には既にシフトが入っているため応募できません。' };
     if (!staff.isActive) return { outcome: 'INELIGIBLE', replyText: '現在は応募できません。店長に確認してください。' };
     const bdate = dbValueToBusinessDate(target.businessDay.businessDate);
-    if (staff.isMinor && overlapsMinorNight({ businessDate: bdate, start: target.start, end: target.end }, settings)) {
+    if (isMinorNow(staff) && overlapsMinorNight({ businessDate: bdate, start: target.start, end: target.end }, settings)) {
       return { outcome: 'INELIGIBLE', replyText: '18歳未満のため 22 時以降のシフトには応募できません。' };
     }
   }
